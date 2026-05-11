@@ -4,6 +4,7 @@ Cargo.lock
 
 # Secret Bento output
 SECRET_BENTO_REPORT.md
+/reports/
 
 # Local env files
 .env
