@@ -202,10 +202,7 @@ impl Scanner for GitleaksScanner {
         let output = match output {
             Ok(output) => output,
             Err(error) if error.kind() == ErrorKind::NotFound => {
-                return Err(
-                    "gitleaks is not installed or not available on PATH. Install gitleaks, or use --scanner builtin."
-                        .to_string(),
-                );
+                return Err(missing_gitleaks_message());
             }
             Err(error) => return Err(format!("failed to run gitleaks: {error}")),
         };
@@ -253,6 +250,13 @@ fn run(args: Vec<String>) -> Result<RunOutcome, SecretBentoError> {
 
     if args.len() == 2 && matches!(args[1].as_str(), "--version" | "-V") {
         println!("{program_name} {VERSION}");
+        return Ok(RunOutcome {
+            findings_found: false,
+        });
+    }
+
+    if args.len() == 2 && args[1] == "doctor" {
+        println!("{}", doctor_report(detect_gitleaks_version()));
         return Ok(RunOutcome {
             findings_found: false,
         });
@@ -376,8 +380,43 @@ fn scanner_for(scanner: ScannerKind) -> Box<dyn Scanner> {
 
 fn usage(program_name: &str) -> String {
     format!(
-        "{program_name} --version\n{program_name} scan <path> [--scanner builtin|gitleaks] [--exclude <glob>]... [--output <path>]"
+        "{program_name} --version\n{program_name} doctor\n{program_name} scan <path> [--scanner builtin|gitleaks] [--exclude <glob>]... [--output <path>]"
     )
+}
+
+fn detect_gitleaks_version() -> Option<String> {
+    let output = Command::new("gitleaks").arg("version").output().ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !stdout.is_empty() {
+        return Some(stdout);
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if stderr.is_empty() {
+        None
+    } else {
+        Some(stderr)
+    }
+}
+
+fn doctor_report(gitleaks_version: Option<String>) -> String {
+    match gitleaks_version {
+        Some(version) => format!(
+            "Secret Bento {VERSION}\n\nOK   secret-bento is installed\nOK   gitleaks is available: {version}\n\nRecommended stronger scan:\n  secret-bento scan . --scanner gitleaks"
+        ),
+        None => format!(
+            "Secret Bento {VERSION}\n\nOK   secret-bento is installed\nWARN gitleaks was not found on PATH\n\nTry a lightweight scan:\n  secret-bento scan .\n\nRecommended stronger scan after installing Gitleaks:\n  secret-bento scan . --scanner gitleaks"
+        ),
+    }
+}
+
+fn missing_gitleaks_message() -> String {
+    "gitleaks was not found on PATH. Gitleaks is optional, but recommended for stronger detection.\n\nTry a lightweight scan:\n  secret-bento scan .\n\nAfter installing Gitleaks, run:\n  secret-bento scan . --scanner gitleaks".to_string()
 }
 
 fn scan_path_recursive(
@@ -1308,6 +1347,45 @@ mod tests {
 
         assert_eq!(outcome.exit_code(), ExitCode::Clean);
         assert!(!outcome.findings_found);
+    }
+
+    #[test]
+    fn doctor_report_guides_when_gitleaks_is_missing() {
+        let report = doctor_report(None);
+
+        assert!(report.contains(&format!("Secret Bento {VERSION}")));
+        assert!(report.contains("OK   secret-bento is installed"));
+        assert!(report.contains("WARN gitleaks was not found on PATH"));
+        assert!(report.contains("secret-bento scan ."));
+        assert!(report.contains("secret-bento scan . --scanner gitleaks"));
+    }
+
+    #[test]
+    fn doctor_report_recommends_gitleaks_scan_when_available() {
+        let report = doctor_report(Some("gitleaks version 8.28.0".to_string()));
+
+        assert!(report.contains("OK   gitleaks is available: gitleaks version 8.28.0"));
+        assert!(report.contains("Recommended stronger scan:"));
+        assert!(report.contains("secret-bento scan . --scanner gitleaks"));
+        assert!(!report.contains("WARN gitleaks"));
+    }
+
+    #[test]
+    fn doctor_command_exits_cleanly_even_without_required_gitleaks() {
+        let outcome = run(vec!["secret-bento".to_string(), "doctor".to_string()]).unwrap();
+
+        assert_eq!(outcome.exit_code(), ExitCode::Clean);
+        assert!(!outcome.findings_found);
+    }
+
+    #[test]
+    fn missing_gitleaks_message_points_to_builtin_and_gitleaks_commands() {
+        let message = missing_gitleaks_message();
+
+        assert!(message.contains("gitleaks was not found on PATH"));
+        assert!(message.contains("optional, but recommended for stronger detection"));
+        assert!(message.contains("secret-bento scan ."));
+        assert!(message.contains("secret-bento scan . --scanner gitleaks"));
     }
 
     #[test]

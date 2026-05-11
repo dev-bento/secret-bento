@@ -30,19 +30,33 @@ After unpacking the archive, verify the binary:
 secret-bento --version
 ```
 
-Then scan the current repository with the default `builtin` scanner:
+You can also check the local setup:
+
+```sh
+secret-bento doctor
+```
+
+### Try Secret Bento Without Extra Tools
+
+Scan the current repository with the default `builtin` scanner:
 
 ```sh
 secret-bento scan .
 ```
 
+This uses the lightweight built-in scanner. It is useful for a quick local smoke check, but it is not a full secret scanner.
+
 Secret Bento writes `SECRET_BENTO_REPORT.md` at the scanned root. Review the report locally before sharing any excerpt with an AI assistant.
 
-For stronger detection, install Gitleaks separately and run:
+### Recommended: Use Gitleaks For Stronger Detection
+
+Install Gitleaks separately, then run:
 
 ```sh
 secret-bento scan . --scanner gitleaks
 ```
+
+In this mode, Gitleaks does the detection. Secret Bento turns the results into a redacted Markdown cleanup report that you can review locally and safely hand to an AI assistant.
 
 ## What Is Secret Bento?
 
@@ -81,6 +95,29 @@ gitleaks version
 ```
 
 If `gitleaks version` does not work, Secret Bento will not be able to run `--scanner gitleaks` either.
+
+## Recommended: Install Gitleaks
+
+Secret Bento works without extra tools, but Gitleaks is recommended when detection coverage matters.
+
+- Secret Bento does not bundle Gitleaks.
+- Secret Bento does not replace Gitleaks.
+- Gitleaks is the detection engine.
+- Secret Bento is the report and context packer.
+- Use `builtin` for a no-dependency smoke check.
+- Use `gitleaks` when you care about detection coverage.
+
+After installing Gitleaks, verify it is available:
+
+```sh
+gitleaks version
+```
+
+Then run:
+
+```sh
+secret-bento scan . --scanner gitleaks
+```
 
 ## Reduce Noise With --exclude
 
