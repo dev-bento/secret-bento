@@ -9,7 +9,6 @@ const REPORT_FILE: &str = "SECRET_BENTO_REPORT.md";
 const IGNORED_DIRS: &[&str] = &[".git", "node_modules", ".next", "dist", "build", "target"];
 const GENERIC_SECRET_NAMES: &[&str] = &["API_KEY", "SECRET_KEY", "TOKEN", "DATABASE_URL"];
 const PLACEHOLDER_VALUES: &[&str] = &[
-    "",
     "changeme",
     "change_me",
     "example",
@@ -122,7 +121,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
     let options = parse_scan_options(&args, program_name)?;
 
     if !options.path.exists() {
-        return Err(format!("scan path does not exist: {}", options.path.display()));
+        return Err(format!(
+            "scan path does not exist: {}",
+            options.path.display()
+        ));
     }
 
     let root = fs::canonicalize(&options.path)
@@ -161,7 +163,10 @@ fn parse_scan_options(args: &[String], program_name: &str) -> Result<ScanOptions
                 scanner = ScannerKind::parse(value)?;
             }
             value if value.starts_with("--") => {
-                return Err(format!("unknown option `{value}`\n\n{}", usage(program_name)));
+                return Err(format!(
+                    "unknown option `{value}`\n\n{}",
+                    usage(program_name)
+                ));
             }
             value => {
                 if path.is_some() {
@@ -388,9 +393,7 @@ fn is_supabase_service_role_line(line: &str) -> bool {
 
 fn is_generic_secret_line(line: &str) -> bool {
     let upper = line.to_ascii_uppercase();
-    GENERIC_SECRET_NAMES
-        .iter()
-        .any(|name| upper.contains(name))
+    GENERIC_SECRET_NAMES.iter().any(|name| upper.contains(name))
         && match extract_assignment_value(line) {
             Some(value) => !is_placeholder_value(value),
             None => false,
@@ -447,8 +450,8 @@ fn check_env_file(root: &Path) -> Vec<Finding> {
         file: Some(PathBuf::from(".env")),
         line: None,
         evidence: ".env exists in the scanned path".to_string(),
-        why_it_matters: "Environment files often contain API keys, database URLs, or deploy tokens."
-            .to_string(),
+        why_it_matters:
+            "Environment files often contain API keys, database URLs, or deploy tokens.".to_string(),
         remediation: vec![
             "Keep `.env` local and out of git.".to_string(),
             "Use `.env.example` for variable names with fake placeholder values.".to_string(),
@@ -463,8 +466,9 @@ fn check_env_file(root: &Path) -> Vec<Finding> {
             file: Some(PathBuf::from(".env")),
             line: None,
             evidence: ".env is tracked by git".to_string(),
-            why_it_matters: "A tracked `.env` file may expose credentials to anyone with repository access."
-                .to_string(),
+            why_it_matters:
+                "A tracked `.env` file may expose credentials to anyone with repository access."
+                    .to_string(),
             remediation: vec![
                 "Stop tracking `.env` with `git rm --cached .env` after confirming a safe backup."
                     .to_string(),
@@ -572,12 +576,7 @@ mod tests {
     fn detects_known_secret_prefixes() {
         let root = Path::new("/repo");
         let path = Path::new("/repo/src/config.ts");
-        let findings = detect_line(
-            root,
-            path,
-            3,
-            "OPENAI_API_KEY=\"sk-1234567890abcdef\"",
-        );
+        let findings = detect_line(root, path, 3, "OPENAI_API_KEY=\"sk-1234567890abcdef\"");
 
         assert!(findings
             .iter()
@@ -593,7 +592,9 @@ mod tests {
 
     #[test]
     fn detects_generic_non_placeholder_values() {
-        assert!(is_generic_secret_line("DATABASE_URL=postgres://user:pass@localhost/db"));
+        assert!(is_generic_secret_line(
+            "DATABASE_URL=postgres://user:pass@localhost/db"
+        ));
         assert!(is_generic_secret_line("SERVICE_TOKEN=real-token-value"));
     }
 
