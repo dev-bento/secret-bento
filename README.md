@@ -12,6 +12,12 @@ Secret Bento is a tiny local CLI that scans a local repository for accidentally 
 
 It is not trying to invent secret scanning. Secret Bento starts with simple local checks and is designed to integrate transparently with proven open source scanners in the future. The value is the report: clean context, practical prioritization, and remediation guidance that is easy to hand to an AI assistant without uploading your codebase.
 
+## Current Status
+
+Secret Bento is an early public placeholder. The repository includes a Rust CLI scaffold, product direction, roadmap, and sample report format, but scanning is not implemented yet.
+
+## Planned Usage
+
 ```sh
 secret-bento scan .
 ```
@@ -40,7 +46,7 @@ Secret Bento prepares that context locally:
 - what remediation steps are likely needed
 - what can be safely shared with an AI assistant
 
-## v0.1 Checks
+## Planned v0.1 Checks
 
 The first version is planned to check for:
 
@@ -75,7 +81,7 @@ Secret Bento may integrate with existing open source secret scanners in future v
 
 ## Planned Rust CLI
 
-This repository is expected to become a small Rust CLI.
+This repository includes a minimal Rust CLI scaffold and is expected to become a small Rust command-line tool.
 
 Possible future structure:
 
@@ -86,8 +92,6 @@ src/
   findings.rs      finding model and severity logic
   report.rs        Markdown report generation
 ```
-
-The current repository is an initial public placeholder with product direction, roadmap, and sample output.
 
 ## Roadmap
 

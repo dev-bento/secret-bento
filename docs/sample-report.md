@@ -4,6 +4,10 @@ Repository: `example-app`
 Scanned path: `.`
 Generated: `2026-05-11T00:00:00Z`
 
+## Report Status
+
+This is a sample of the intended Markdown output. Secret Bento is currently an early public placeholder, and scanning is not implemented yet.
+
 ## Summary
 
 Secret Bento found possible secret exposure risks that should be reviewed locally before asking an AI assistant for help.
@@ -81,4 +85,4 @@ I scanned my local repository with Secret Bento. The report below contains redac
 
 ## Notes
 
-This report is local-first and Markdown-first. Secret Bento does not upload code, does not call AI APIs, and does not automatically fix secrets.
+Secret Bento reports are local-first and Markdown-first. Secret Bento does not upload code, does not call AI APIs, and does not automatically fix secrets.
