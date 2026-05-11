@@ -364,7 +364,7 @@ fn secret_finding(
 }
 
 fn contains_openai_key(line: &str) -> bool {
-    line.split(|character: char| character.is_whitespace() || character == '"' || character == '\'')
+    line.split(|character: char| character.is_whitespace() || matches!(character, '"' | '\'' | '='))
         .any(|part| part.starts_with("sk-") && part.len() >= 12)
 }
 
@@ -401,7 +401,11 @@ fn is_generic_secret_line(line: &str) -> bool {
 }
 
 fn extract_assignment_value(line: &str) -> Option<&str> {
-    let separator_index = line.find('=').or_else(|| line.find(':'))?;
+    let separator_index = match line.find('=') {
+        Some(index) if has_non_config_colon_before(line, index) => return None,
+        Some(index) => index,
+        None => config_like_colon_separator_index(line)?,
+    };
     let value = line[separator_index + 1..].trim();
     let value = value.trim_matches(|character| {
         matches!(character, '"' | '\'' | '`' | ',' | ';') || character.is_whitespace()
@@ -411,6 +415,31 @@ fn extract_assignment_value(line: &str) -> Option<&str> {
         None
     } else {
         Some(value)
+    }
+}
+
+fn has_non_config_colon_before(line: &str, end_index: usize) -> bool {
+    let prefix = &line[..end_index];
+
+    prefix.contains(':') && config_like_colon_separator_index(prefix).is_none()
+}
+
+fn config_like_colon_separator_index(line: &str) -> Option<usize> {
+    let separator_index = line.find(':')?;
+    let key = line[..separator_index].trim();
+    let value = line[separator_index + 1..].trim();
+
+    if key.is_empty() || value.is_empty() || key.contains(char::is_whitespace) {
+        return None;
+    }
+
+    if key
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.'))
+    {
+        Some(separator_index)
+    } else {
+        None
     }
 }
 
@@ -539,7 +568,8 @@ fn generate_report(root: &Path, scanner_name: &str, findings: &[Finding]) -> Str
             if let Some(line) = finding.line {
                 report.push_str(&format!("- Line: {line}\n"));
             }
-            report.push_str(&format!("- Evidence: `{}`\n", finding.evidence));
+            report.push_str("- Evidence:\n\n");
+            push_markdown_code_block(&mut report, &finding.evidence);
             report.push_str(&format!("- Why it matters: {}\n", finding.why_it_matters));
             report.push_str("- Suggested remediation:\n");
             for step in &finding.remediation {
@@ -568,6 +598,16 @@ fn generate_report(root: &Path, scanner_name: &str, findings: &[Finding]) -> Str
     report
 }
 
+fn push_markdown_code_block(report: &mut String, content: &str) {
+    let fence = if content.contains("```") {
+        "````"
+    } else {
+        "```"
+    };
+
+    report.push_str(&format!("{fence}text\n{content}\n{fence}\n"));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -585,9 +625,35 @@ mod tests {
     }
 
     #[test]
+    fn detects_openai_key_assignment() {
+        let root = Path::new("/repo");
+        let path = Path::new("/repo/.env");
+        let findings = detect_line(
+            root,
+            path,
+            1,
+            "OPENAI_API_KEY=sk-test_fake_key_for_secret_bento_demo",
+        );
+
+        assert!(findings
+            .iter()
+            .any(|finding| finding.title == "Possible OpenAI API Key"));
+        assert_eq!(findings[0].evidence, "OPENAI_API_KEY=<REDACTED>");
+    }
+
+    #[test]
     fn ignores_placeholder_generic_values() {
         assert!(!is_generic_secret_line("API_KEY=replace_me"));
         assert!(!is_generic_secret_line("DATABASE_URL=example"));
+    }
+
+    #[test]
+    fn ignores_rust_type_annotations_as_generic_assignments() {
+        assert!(!is_generic_secret_line(
+            "fn contains_github_token(line: &str) -> bool {"
+        ));
+        assert!(!is_generic_secret_line("let value: String = token;"));
+        assert!(!is_generic_secret_line("const foo: Bar = DATABASE_URL;"));
     }
 
     #[test]
@@ -596,6 +662,9 @@ mod tests {
             "DATABASE_URL=postgres://user:pass@localhost/db"
         ));
         assert!(is_generic_secret_line("SERVICE_TOKEN=real-token-value"));
+        assert!(is_generic_secret_line(
+            "DATABASE_URL: postgres://user:pass@localhost/db"
+        ));
     }
 
     #[test]
@@ -614,6 +683,26 @@ mod tests {
         assert!(report.contains("## Safety Note"));
         assert!(report.contains("## Suggested Remediation"));
         assert!(report.contains("## AI Handoff Prompt"));
+    }
+
+    #[test]
+    fn report_renders_backtick_evidence_as_fenced_code() {
+        let finding = Finding {
+            title: "Possible OpenAI API Key".to_string(),
+            severity: Severity::High,
+            confidence: "Medium",
+            file: Some(PathBuf::from("docs/sample-report.md")),
+            line: Some(34),
+            evidence: "- Evidence: `OPENAI_API_KEY=<REDACTED>`".to_string(),
+            why_it_matters: "Test finding.".to_string(),
+            remediation: vec!["Review locally.".to_string()],
+        };
+        let report = generate_report(Path::new("/repo"), "builtin", &[finding]);
+
+        assert!(
+            report.contains("- Evidence:\n\n```text\n- Evidence: `OPENAI_API_KEY=<REDACTED>`\n```")
+        );
+        assert!(!report.contains("- Evidence: `- Evidence: `OPENAI_API_KEY=<REDACTED>``"));
     }
 
     #[test]
