@@ -15,22 +15,25 @@ Secret Bento is starting as a small, local-first CLI focused on safe AI handoff 
 - Generate `SECRET_BENTO_REPORT.md`.
 - Include severity, confidence, file path, line number, evidence summary, and suggested remediation.
 
-## v0.2 - Better Context And Prioritization
+## v0.2 - Gitleaks Scanner Integration
 
-- Add configurable include and exclude paths.
-- Add machine-readable output, likely JSON, for editor and CI workflows.
+- Add `--scanner gitleaks`.
+- Run the external `gitleaks` CLI as the detection engine.
+- Do not copy, vendor, or reimplement gitleaks rules.
+- Emit a clear missing-binary error when `gitleaks` is not installed or not on `PATH`.
+- Parse gitleaks JSON reports into an internal `SecretBentoFinding` model.
+- Normalize scanner findings into scanner, rule ID, severity, file, line, secret type, fingerprint, description, risk, remediation steps, and verification commands.
+- Keep raw gitleaks `Secret` and `Match` values out of Markdown output.
+- Keep Markdown-first AI handoff reports as the primary user experience.
+
+## v0.3 - Better Context And Prioritization
+
+- Add configurable include paths.
+- Add machine-readable Secret Bento output, likely JSON, for editor and CI workflows.
 - Improve severity scoring based on file type, key type, and exposure likelihood.
-- Add guidance for rotation, revocation, and git history cleanup.
+- Add deeper guidance for rotation, revocation, and git history cleanup.
 - Add safer snippets with strict redaction and minimal surrounding context.
-
-## v0.3 - OSS Scanner Integration
-
-- Evaluate integration with gitleaks or other established open source secret scanners.
-- Add a planned `--scanner gitleaks` mode without vendoring or copying scanner code.
-- Document exactly which scanner is used and how it runs locally.
-- Normalize scanner findings into the Secret Bento report format.
-- Keep Markdown-first output as the primary user experience.
-- Keep Secret Bento focused on AI-ready remediation reporting, prioritization, and safe context packaging.
+- Evaluate additional scanner integrations using the same adapter and normalization pattern.
 
 ## Later
 

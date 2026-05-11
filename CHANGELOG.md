@@ -1,11 +1,18 @@
 # Changelog
 
-## Unreleased v0.1.2
+## Unreleased v0.2.0
 
 ### Added
 - Added repeatable `--exclude <glob>` scan filters for reducing local noise from docs, tests, fixtures, and sample reports.
 - Added `--output <path>` for writing reports outside the default `SECRET_BENTO_REPORT.md` location.
 - Added README Quick Start examples and project badges.
+- Added `--scanner gitleaks` using the external gitleaks CLI as the detection engine.
+- Added gitleaks JSON parsing into normalized `SecretBentoFinding` values.
+- Added redacted AI-ready Markdown fields for scanner, rule ID, severity, file, line, secret type, fingerprint, description, risk, remediation steps, and verification commands.
+- Added fixture-based gitleaks tests that do not require the gitleaks binary.
+
+### Changed
+- Secret Bento now acts as a scanner orchestrator, finding normalizer, and remediation report writer for gitleaks findings.
 
 ## v0.1.1 - 2026-05-11
 

@@ -1,0 +1,21 @@
+[
+  {
+    "Description": "AWS Access Key",
+    "StartLine": 7,
+    "EndLine": 7,
+    "StartColumn": 18,
+    "EndColumn": 38,
+    "Match": "AWS_ACCESS_KEY_ID=<raw secret omitted from normalized report>",
+    "Secret": "AKIAIOSFODNN7EXAMPLE",
+    "File": "src/config.ts",
+    "RuleID": "aws-access-token",
+    "Fingerprint": "src/config.ts:aws-access-token:7"
+  },
+  {
+    "Description": "Generic API Key",
+    "StartLine": 12,
+    "File": "README.md",
+    "RuleID": "generic-api-key",
+    "Secret": "super-secret-fixture-value"
+  }
+]

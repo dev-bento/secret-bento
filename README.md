@@ -18,7 +18,7 @@ It is not trying to invent secret scanning or replace mature OSS scanners. Secre
 
 ## Current Status
 
-Secret Bento has a small v0.1 Rust CLI MVP. It can scan a local path with the default `builtin` scanner and write a redacted Markdown report.
+Secret Bento has a small Rust CLI. It can scan a local path with the default `builtin` scanner or orchestrate the external `gitleaks` CLI, normalize findings, and write a redacted Markdown remediation report.
 
 The `builtin` scanner is intentionally basic. It does not replace established secret scanners or professional security review.
 
@@ -42,6 +42,12 @@ Write the report to a custom path:
 secret-bento scan . --output reports/secret-report.md
 ```
 
+Use gitleaks as the detection engine:
+
+```sh
+secret-bento scan . --scanner gitleaks
+```
+
 By default, Secret Bento writes `SECRET_BENTO_REPORT.md` at the scanned root.
 
 ## Usage
@@ -51,6 +57,16 @@ The scanner option is available now, with `builtin` as the default:
 ```sh
 secret-bento scan . --scanner builtin
 ```
+
+The `gitleaks` scanner mode shells out to the external `gitleaks` binary:
+
+```sh
+secret-bento scan . --scanner gitleaks
+```
+
+Secret Bento does not vendor or copy gitleaks rules. It runs `gitleaks detect --report-format json --report-path <temp-file>` locally, parses the JSON report, drops raw secret values, and converts each result into a Secret Bento finding.
+
+If `gitleaks` is not installed or not on `PATH`, Secret Bento exits with a clear missing-binary error.
 
 You can provide multiple `--exclude <glob>` values to skip noisy local paths during scanning:
 
@@ -111,6 +127,26 @@ The current `builtin` scanner checks for:
 
 Findings redact detected values by default.
 
+## v0.2 Gitleaks Integration
+
+With `--scanner gitleaks`, Secret Bento uses gitleaks as the detection engine and focuses on orchestration, normalization, and safe remediation reporting.
+
+Normalized report fields include:
+
+- scanner
+- rule ID
+- severity
+- file
+- line
+- secret type
+- fingerprint when available
+- description
+- risk
+- remediation steps
+- verification commands
+
+Markdown reports do not include gitleaks raw `Secret` or `Match` values.
+
 ## What It Does Not Do
 
 Secret Bento:
@@ -129,17 +165,9 @@ It prepares clean local context so you can hand the report to ChatGPT, Claude, C
 
 Never paste real secrets into AI chats. Secret Bento reports should redact detected values and include only enough surrounding context to support safe cleanup.
 
-## Future OSS Scanner Integration
+## OSS Scanner Integration
 
-Secret Bento may integrate with gitleaks or other existing open source secret scanners in future versions instead of maintaining every detection rule itself.
-
-No gitleaks integration is included yet. A future command may look like:
-
-```sh
-secret-bento scan . --scanner gitleaks
-```
-
-Any integration should be documented clearly, including what scanner is used, what data stays local, and how results are transformed into the Markdown report.
+Secret Bento integrates with gitleaks without maintaining its rule set. Future scanner integrations should follow the same adapter pattern: run the scanner locally, parse its machine-readable output, normalize into Secret Bento findings, and keep Markdown output redacted.
 
 ## Rust CLI Structure
 
