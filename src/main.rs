@@ -51,6 +51,65 @@ struct Finding {
     remediation: Vec<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ScannerKind {
+    Builtin,
+}
+
+impl ScannerKind {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "builtin" => Ok(ScannerKind::Builtin),
+            "gitleaks" => Err("scanner `gitleaks` is planned but not implemented yet".to_string()),
+            other => Err(format!(
+                "unknown scanner `{other}`; supported scanner: builtin"
+            )),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ScanOptions {
+    scanner: ScannerKind,
+    path: PathBuf,
+}
+
+#[derive(Clone, Debug)]
+struct ScanContext {
+    root: PathBuf,
+}
+
+#[derive(Clone, Debug)]
+struct ScanResult {
+    scanner_name: &'static str,
+    findings: Vec<Finding>,
+}
+
+trait Scanner {
+    fn name(&self) -> &'static str;
+    fn scan(&self, context: &ScanContext) -> Result<ScanResult, String>;
+}
+
+struct BuiltinScanner;
+
+impl Scanner for BuiltinScanner {
+    fn name(&self) -> &'static str {
+        "builtin"
+    }
+
+    fn scan(&self, context: &ScanContext) -> Result<ScanResult, String> {
+        let mut findings = Vec::new();
+        scan_path_recursive(&context.root, &context.root, &mut findings)
+            .map_err(|error| format!("failed while scanning files: {error}"))?;
+        findings.extend(check_env_file(&context.root));
+
+        Ok(ScanResult {
+            scanner_name: self.name(),
+            findings,
+        })
+    }
+}
+
 fn main() {
     if let Err(error) = run(env::args().collect()) {
         eprintln!("error: {error}");
@@ -59,33 +118,75 @@ fn main() {
 }
 
 fn run(args: Vec<String>) -> Result<(), String> {
-    if args.len() != 3 || args[1] != "scan" {
-        return Err(format!(
-            "usage: {} scan <path>",
-            args.first().map_or("secret-bento", String::as_str)
-        ));
+    let program_name = args.first().map_or("secret-bento", String::as_str);
+    let options = parse_scan_options(&args, program_name)?;
+
+    if !options.path.exists() {
+        return Err(format!("scan path does not exist: {}", options.path.display()));
     }
 
-    let scan_path = PathBuf::from(&args[2]);
-    if !scan_path.exists() {
-        return Err(format!("scan path does not exist: {}", scan_path.display()));
-    }
-
-    let root = fs::canonicalize(&scan_path)
+    let root = fs::canonicalize(&options.path)
         .map_err(|error| format!("failed to resolve scan path: {error}"))?;
-    let mut findings = Vec::new();
+    let context = ScanContext { root };
+    let scanner = scanner_for(options.scanner);
+    let result = scanner.scan(&context)?;
 
-    scan_path_recursive(&root, &root, &mut findings)
-        .map_err(|error| format!("failed while scanning files: {error}"))?;
-    findings.extend(check_env_file(&root));
-
-    let report = generate_report(&root, &findings);
-    let report_path = root.join(REPORT_FILE);
+    let report = generate_report(&context.root, result.scanner_name, &result.findings);
+    let report_path = context.root.join(REPORT_FILE);
     fs::write(&report_path, report)
         .map_err(|error| format!("failed to write {}: {error}", report_path.display()))?;
 
     println!("Generated {}", report_path.display());
     Ok(())
+}
+
+fn parse_scan_options(args: &[String], program_name: &str) -> Result<ScanOptions, String> {
+    if args.len() < 3 || args[1] != "scan" {
+        return Err(usage(program_name));
+    }
+
+    let mut scanner = ScannerKind::Builtin;
+    let mut path = None;
+    let mut index = 2;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--scanner" => {
+                index += 1;
+                let value = args.get(index).ok_or_else(|| usage(program_name))?;
+                scanner = ScannerKind::parse(value)?;
+            }
+            value if value.starts_with("--scanner=") => {
+                let value = value.trim_start_matches("--scanner=");
+                scanner = ScannerKind::parse(value)?;
+            }
+            value if value.starts_with("--") => {
+                return Err(format!("unknown option `{value}`\n\n{}", usage(program_name)));
+            }
+            value => {
+                if path.is_some() {
+                    return Err(usage(program_name));
+                }
+                path = Some(PathBuf::from(value));
+            }
+        }
+
+        index += 1;
+    }
+
+    let path = path.ok_or_else(|| usage(program_name))?;
+
+    Ok(ScanOptions { scanner, path })
+}
+
+fn scanner_for(scanner: ScannerKind) -> Box<dyn Scanner> {
+    match scanner {
+        ScannerKind::Builtin => Box::new(BuiltinScanner),
+    }
+}
+
+fn usage(program_name: &str) -> String {
+    format!("{program_name} scan <path> [--scanner builtin]")
 }
 
 fn scan_path_recursive(root: &Path, current: &Path, findings: &mut Vec<Finding>) -> io::Result<()> {
@@ -390,7 +491,7 @@ fn is_env_tracked_by_git(root: &Path) -> bool {
     }
 }
 
-fn generate_report(root: &Path, findings: &[Finding]) -> String {
+fn generate_report(root: &Path, scanner_name: &str, findings: &[Finding]) -> String {
     let high = findings
         .iter()
         .filter(|finding| finding.severity == Severity::High)
@@ -407,8 +508,10 @@ fn generate_report(root: &Path, findings: &[Finding]) -> String {
     let mut report = String::new();
     report.push_str("# Secret Bento Report\n\n");
     report.push_str(&format!("Scanned path: `{}`\n\n", root.display()));
+    report.push_str(&format!("Scanner: `{scanner_name}`\n\n"));
     report.push_str("## Summary\n\n");
-    report.push_str("Secret Bento scanned local files for simple secret-like patterns and generated this Markdown report without uploading code or calling AI APIs.\n\n");
+    report.push_str("Secret Bento generated this AI-ready remediation report locally without uploading code or calling AI APIs.\n\n");
+    report.push_str("The `builtin` scanner uses simple checks. Secret Bento is designed to package findings into safe Markdown context, not replace mature OSS secret scanners.\n\n");
     report.push_str("| Severity | Count |\n");
     report.push_str("| --- | ---: |\n");
     report.push_str(&format!("| High | {high} |\n"));
@@ -503,12 +606,52 @@ mod tests {
 
     #[test]
     fn report_includes_required_sections() {
-        let report = generate_report(Path::new("/repo"), &[]);
+        let report = generate_report(Path::new("/repo"), "builtin", &[]);
 
         assert!(report.contains("## Summary"));
         assert!(report.contains("## Findings"));
         assert!(report.contains("## Safety Note"));
         assert!(report.contains("## Suggested Remediation"));
         assert!(report.contains("## AI Handoff Prompt"));
+    }
+
+    #[test]
+    fn parses_default_builtin_scanner() {
+        let args = vec![
+            "secret-bento".to_string(),
+            "scan".to_string(),
+            ".".to_string(),
+        ];
+        let options = parse_scan_options(&args, "secret-bento").unwrap();
+
+        assert_eq!(options.scanner, ScannerKind::Builtin);
+        assert_eq!(options.path, PathBuf::from("."));
+    }
+
+    #[test]
+    fn parses_explicit_builtin_scanner() {
+        let args = vec![
+            "secret-bento".to_string(),
+            "scan".to_string(),
+            ".".to_string(),
+            "--scanner".to_string(),
+            "builtin".to_string(),
+        ];
+        let options = parse_scan_options(&args, "secret-bento").unwrap();
+
+        assert_eq!(options.scanner, ScannerKind::Builtin);
+    }
+
+    #[test]
+    fn rejects_planned_gitleaks_scanner() {
+        let args = vec![
+            "secret-bento".to_string(),
+            "scan".to_string(),
+            ".".to_string(),
+            "--scanner=gitleaks".to_string(),
+        ];
+        let error = parse_scan_options(&args, "secret-bento").unwrap_err();
+
+        assert!(error.contains("planned but not implemented"));
     }
 }

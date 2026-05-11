@@ -6,6 +6,7 @@ Secret Bento is starting as a small, local-first CLI focused on safe AI handoff 
 
 - Create a Rust CLI skeleton.
 - Add `secret-bento scan <path>`.
+- Add scanner selection with `--scanner builtin`, using `builtin` as the default.
 - Detect common secret-like patterns in text files.
 - Flag `.env` files that appear to be tracked.
 - Flag `.env.example` values that look real instead of illustrative.
@@ -24,10 +25,12 @@ Secret Bento is starting as a small, local-first CLI focused on safe AI handoff 
 
 ## v0.3 - OSS Scanner Integration
 
-- Evaluate integration with established open source secret scanners.
+- Evaluate integration with gitleaks or other established open source secret scanners.
+- Add a planned `--scanner gitleaks` mode without vendoring or copying scanner code.
 - Document exactly which scanner is used and how it runs locally.
 - Normalize scanner findings into the Secret Bento report format.
 - Keep Markdown-first output as the primary user experience.
+- Keep Secret Bento focused on AI-ready remediation reporting, prioritization, and safe context packaging.
 
 ## Later
 

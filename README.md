@@ -10,13 +10,13 @@ Don’t dump your repo. Pack it into a bento.
 
 Secret Bento is a tiny local CLI that scans a local repository for accidentally leaked secrets and generates an AI-ready remediation report in Markdown.
 
-It is not trying to invent secret scanning. Secret Bento starts with simple local checks and is designed to integrate transparently with proven open source scanners in the future. The value is the report: clean context, practical prioritization, and remediation guidance that is easy to hand to an AI assistant without uploading your codebase.
+It is not trying to invent secret scanning or replace mature OSS scanners. Secret Bento starts with simple built-in checks and is designed to integrate transparently with tools like gitleaks or other open source scanners in the future. The value is the report: safe context packaging, practical prioritization, and remediation guidance that is easy to hand to an AI assistant without uploading your codebase.
 
 ## Current Status
 
-Secret Bento has a small v0.1 Rust CLI MVP. It can scan a local path for simple secret-like patterns and write a redacted Markdown report.
+Secret Bento has a small v0.1 Rust CLI MVP. It can scan a local path with the default `builtin` scanner and write a redacted Markdown report.
 
-The scanner is intentionally basic. It does not replace established secret scanners or professional security review.
+The `builtin` scanner is intentionally basic. It does not replace established secret scanners or professional security review.
 
 ## Usage
 
@@ -24,6 +24,12 @@ From a built local binary:
 
 ```sh
 secret-bento scan .
+```
+
+The scanner option is available now, with `builtin` as the default:
+
+```sh
+secret-bento scan . --scanner builtin
 ```
 
 During development:
@@ -56,9 +62,9 @@ Secret Bento prepares that context locally:
 - what remediation steps are likely needed
 - what can be safely shared with an AI assistant
 
-## v0.1 Checks
+## v0.1 Built-In Checks
 
-The current MVP checks for:
+The current `builtin` scanner checks for:
 
 - possible hardcoded API keys
 - `.env` tracking risk
@@ -87,15 +93,23 @@ Secret Bento:
 
 Secret Bento is local-first and Markdown-first.
 
-It prepares clean local context so you can hand the report to ChatGPT, Claude, Codex, Cursor, or Gemini and ask for help with remediation planning.
+It prepares clean local context so you can hand the report to ChatGPT, Claude, Codex, Cursor, or Gemini and ask for help with remediation planning. Secret Bento's core value is AI-ready remediation reporting, prioritization, and safe context packaging.
 
 Never paste real secrets into AI chats. Secret Bento reports should redact detected values and include only enough surrounding context to support safe cleanup.
 
 ## Future OSS Scanner Integration
 
-Secret Bento may integrate with existing open source secret scanners in future versions instead of maintaining every detection rule itself. Any integration should be documented clearly, including what scanner is used, what data stays local, and how results are transformed into the Markdown report.
+Secret Bento may integrate with gitleaks or other existing open source secret scanners in future versions instead of maintaining every detection rule itself.
 
-## Planned Rust CLI
+No gitleaks integration is included yet. A future command may look like:
+
+```sh
+secret-bento scan . --scanner gitleaks
+```
+
+Any integration should be documented clearly, including what scanner is used, what data stays local, and how results are transformed into the Markdown report.
+
+## Rust CLI Structure
 
 This repository includes a minimal Rust command-line tool.
 

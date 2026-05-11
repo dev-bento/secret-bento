@@ -2,6 +2,7 @@
 
 Repository: `example-app`
 Scanned path: `.`
+Scanner: `builtin`
 Generated: `2026-05-11T00:00:00Z`
 
 ## Report Status
