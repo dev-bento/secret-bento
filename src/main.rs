@@ -96,6 +96,56 @@ struct ScanResult {
     findings: Vec<SecretBentoFinding>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExitCode {
+    Clean = 0,
+    Findings = 1,
+    Usage = 2,
+    Runtime = 3,
+}
+
+impl ExitCode {
+    fn as_i32(self) -> i32 {
+        self as i32
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RunOutcome {
+    findings_found: bool,
+}
+
+impl RunOutcome {
+    fn exit_code(&self) -> ExitCode {
+        if self.findings_found {
+            ExitCode::Findings
+        } else {
+            ExitCode::Clean
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SecretBentoError {
+    Usage(String),
+    Runtime(String),
+}
+
+impl SecretBentoError {
+    fn exit_code(&self) -> ExitCode {
+        match self {
+            SecretBentoError::Usage(_) => ExitCode::Usage,
+            SecretBentoError::Runtime(_) => ExitCode::Runtime,
+        }
+    }
+
+    fn message(&self) -> &str {
+        match self {
+            SecretBentoError::Usage(message) | SecretBentoError::Runtime(message) => message,
+        }
+    }
+}
+
 trait Scanner {
     fn name(&self) -> &'static str;
     fn scan(&self, context: &ScanContext) -> Result<ScanResult, String>;
@@ -188,47 +238,57 @@ impl Scanner for GitleaksScanner {
 }
 
 fn main() {
-    if let Err(error) = run(env::args().collect()) {
-        eprintln!("error: {error}");
-        std::process::exit(1);
+    match run(env::args().collect()) {
+        Ok(outcome) => std::process::exit(outcome.exit_code().as_i32()),
+        Err(error) => {
+            eprintln!("error: {}", error.message());
+            std::process::exit(error.exit_code().as_i32());
+        }
     }
 }
 
-fn run(args: Vec<String>) -> Result<(), String> {
+fn run(args: Vec<String>) -> Result<RunOutcome, SecretBentoError> {
     let program_name = args.first().map_or("secret-bento", String::as_str);
-    let options = parse_scan_options(&args, program_name)?;
+    let options = parse_scan_options(&args, program_name).map_err(SecretBentoError::Usage)?;
 
     if !options.path.exists() {
-        return Err(format!(
+        return Err(SecretBentoError::Usage(format!(
             "scan path does not exist: {}",
             options.path.display()
-        ));
+        )));
     }
 
-    let root = fs::canonicalize(&options.path)
-        .map_err(|error| format!("failed to resolve scan path: {error}"))?;
+    let root = fs::canonicalize(&options.path).map_err(|error| {
+        SecretBentoError::Runtime(format!("failed to resolve scan path: {error}"))
+    })?;
     let context = ScanContext {
         root,
         excludes: options.excludes,
     };
     let scanner = scanner_for(options.scanner);
-    let result = scanner.scan(&context)?;
+    let result = scanner.scan(&context).map_err(SecretBentoError::Runtime)?;
 
     let report = generate_report(&context.root, result.scanner_name, &result.findings);
     let report_path = resolve_report_path(&context.root, options.output.as_deref());
     if let Some(parent) = report_path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
-            format!(
+            SecretBentoError::Runtime(format!(
                 "failed to create report directory {}: {error}",
                 parent.display()
-            )
+            ))
         })?;
     }
-    fs::write(&report_path, report)
-        .map_err(|error| format!("failed to write {}: {error}", report_path.display()))?;
+    fs::write(&report_path, report).map_err(|error| {
+        SecretBentoError::Runtime(format!(
+            "failed to write {}: {error}",
+            report_path.display()
+        ))
+    })?;
 
     println!("Generated {}", report_path.display());
-    Ok(())
+    Ok(RunOutcome {
+        findings_found: !result.findings.is_empty(),
+    })
 }
 
 fn parse_scan_options(args: &[String], program_name: &str) -> Result<ScanOptions, String> {
@@ -969,6 +1029,44 @@ mod tests {
             fs::create_dir_all(parent).unwrap();
         }
         fs::write(path, content).unwrap();
+    }
+
+    #[test]
+    fn completed_scan_without_findings_exits_cleanly() {
+        let outcome = RunOutcome {
+            findings_found: false,
+        };
+
+        assert_eq!(outcome.exit_code(), ExitCode::Clean);
+        assert_eq!(outcome.exit_code().as_i32(), 0);
+    }
+
+    #[test]
+    fn completed_scan_with_findings_exits_with_findings_code() {
+        let outcome = RunOutcome {
+            findings_found: true,
+        };
+
+        assert_eq!(outcome.exit_code(), ExitCode::Findings);
+        assert_eq!(outcome.exit_code().as_i32(), 1);
+    }
+
+    #[test]
+    fn usage_errors_exit_with_usage_code() {
+        let error = SecretBentoError::Usage("bad arguments".to_string());
+
+        assert_eq!(error.exit_code(), ExitCode::Usage);
+        assert_eq!(error.exit_code().as_i32(), 2);
+        assert_eq!(error.message(), "bad arguments");
+    }
+
+    #[test]
+    fn runtime_errors_exit_with_runtime_code() {
+        let error = SecretBentoError::Runtime("scanner failed".to_string());
+
+        assert_eq!(error.exit_code(), ExitCode::Runtime);
+        assert_eq!(error.exit_code().as_i32(), 3);
+        assert_eq!(error.message(), "scanner failed");
     }
 
     #[test]

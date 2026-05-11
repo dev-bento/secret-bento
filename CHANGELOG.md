@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased v0.2.1
+
+### Added
+- Added CI-friendly exit codes for clean scans, completed scans with findings, usage/configuration errors, and runtime failures.
+- Added tests for exit code decision logic.
+
+### Changed
+- Reworked README usage guidance around local scanning, Gitleaks scanning, excludes, custom report paths, CI usage, and safe AI handoff.
+- Expanded Gitleaks installation and PATH troubleshooting notes.
+
 ## v0.2.0 - 2026-05-11
 
 ### Added

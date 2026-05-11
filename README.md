@@ -22,66 +22,112 @@ Secret Bento has a small Rust CLI. It can scan a local path with the default `bu
 
 The `builtin` scanner is intentionally basic. It does not replace established secret scanners or professional security review.
 
-## Quick Start
+## Try The Built-In Scanner Locally
 
-From a built local binary:
+From a built local binary, scan the current repository with the default `builtin` scanner:
 
 ```sh
 secret-bento scan .
 ```
 
-Reduce local report noise from docs, tests, fixtures, and sample reports:
+By default, Secret Bento writes `SECRET_BENTO_REPORT.md` at the scanned root. The built-in scanner is intentionally small and local-first. It is useful for quick checks before asking an AI assistant for remediation help, but it does not replace mature scanners or professional security review.
+
+During development:
 
 ```sh
-secret-bento scan . --exclude docs/** --exclude tests/**
+cargo run -- scan .
 ```
 
-Write the report to a custom path:
+## Use Gitleaks For Stronger Scanning
+
+Use Gitleaks as the detection engine when you want stronger scanner coverage:
+
+```sh
+secret-bento scan . --scanner gitleaks
+```
+
+Secret Bento does not bundle Gitleaks. The `--scanner gitleaks` mode shells out to a locally installed `gitleaks` binary, runs `gitleaks detect --report-format json --report-path <temp-file>`, parses the JSON report, drops raw secret values, and converts each result into a Secret Bento finding.
+
+Before using this mode, verify that Gitleaks is installed and available in the same shell:
+
+```sh
+gitleaks version
+```
+
+If `gitleaks version` does not work, Secret Bento will not be able to run `--scanner gitleaks` either.
+
+## Reduce Noise With --exclude
+
+Use repeatable `--exclude <glob>` filters with the built-in scanner to skip noisy local paths during scanning:
+
+```sh
+secret-bento scan . --exclude docs/** --exclude tests/** --exclude **/*.md
+```
+
+This is useful for sample reports, fixtures, generated files, or documentation snippets that are intentionally fake. When using `--scanner gitleaks`, use Gitleaks configuration or ignore files for Gitleaks-specific allowlisting.
+
+## Write Reports With --output
+
+Use `--output <path>` to choose where the Markdown report is written:
 
 ```sh
 secret-bento scan . --output reports/secret-report.md
 ```
 
-Use gitleaks as the detection engine:
+Relative output paths are resolved from the scanned root, and parent directories are created when needed. Absolute output paths are used as provided.
+
+## Use In CI
+
+Secret Bento uses CI-friendly exit codes:
+
+| Exit code | Meaning |
+| ---: | --- |
+| 0 | Scan completed and no findings were found. |
+| 1 | Scan completed and findings were found. |
+| 2 | CLI usage or configuration error. |
+| 3 | Scanner execution, file IO, JSON parse, or internal error. |
+
+Example GitHub Actions step:
 
 ```sh
-secret-bento scan . --scanner gitleaks
+secret-bento scan . --scanner gitleaks --output reports/secret-bento.md
 ```
 
-By default, Secret Bento writes `SECRET_BENTO_REPORT.md` at the scanned root.
+Exit code `1` means the scan completed and found possible secrets. Treat that as a CI failure for protected branches, then inspect the generated Markdown report locally or as a CI artifact.
 
-## Usage
+## Hand The Report To An AI Assistant Safely
 
-The scanner option is available now, with `builtin` as the default:
+Secret Bento is designed to produce redacted, AI-ready remediation context. Before pasting any report excerpt into ChatGPT, Claude, Codex, Cursor, Gemini, or another AI assistant:
 
-```sh
-secret-bento scan . --scanner builtin
-```
+- Review the report locally.
+- Confirm that no real secret values appear in the Markdown.
+- Share only the findings and remediation context needed for help.
+- Do not paste raw credentials, `.env` contents, or unredacted scanner output into chat.
 
-The `gitleaks` scanner mode shells out to the external `gitleaks` binary:
-
-```sh
-secret-bento scan . --scanner gitleaks
-```
-
-Secret Bento does not vendor or copy gitleaks rules. It runs `gitleaks detect --report-format json --report-path <temp-file>` locally, parses the JSON report, drops raw secret values, and converts each result into a Secret Bento finding.
-
-If `gitleaks` is not installed or not on `PATH`, Secret Bento exits with a clear missing-binary error.
+The report includes an AI handoff prompt you can use after that local review.
 
 ## Gitleaks Installation And PATH
 
 Secret Bento does not bundle Gitleaks. The `--scanner gitleaks` mode requires a locally installed `gitleaks` binary that is available on your `PATH`.
 
-If `gitleaks` is not installed or your shell cannot find it, either use the built-in scanner:
-
-```sh
-secret-bento scan . --scanner builtin
-```
-
-or install Gitleaks using an official or commonly accepted method for your operating system, then verify:
+Install Gitleaks using the official instructions for your operating system, then verify:
 
 ```sh
 gitleaks version
+```
+
+If that command fails, check that the directory containing the `gitleaks` binary is on `PATH`, then open a new shell and try again. Secret Bento runs the same `gitleaks` command your shell resolves.
+
+When Gitleaks is missing or not on `PATH`, Secret Bento prints:
+
+```text
+error: gitleaks is not installed or not available on PATH. Install gitleaks, or use --scanner builtin.
+```
+
+Use the built-in scanner as a fallback while you fix the Gitleaks installation:
+
+```sh
+secret-bento scan . --scanner builtin
 ```
 
 After `gitleaks version` works in the same shell, rerun Secret Bento with:
@@ -92,22 +138,13 @@ secret-bento scan . --scanner gitleaks
 
 Never paste raw secrets into AI chats. Secret Bento's Markdown report is designed to omit raw Gitleaks `Secret` and `Match` values, but you should still review reports locally before sharing excerpts.
 
-You can provide multiple `--exclude <glob>` values to skip noisy local paths during scanning:
+## Usage Reference
+
+The scanner option supports `builtin` and `gitleaks`, with `builtin` as the default:
 
 ```sh
-secret-bento scan . --exclude docs/** --exclude tests/** --exclude **/*.md
-```
-
-Use `--output <path>` to choose where the Markdown report is written. Relative output paths are resolved from the scanned root, and parent directories are created when needed:
-
-```sh
-secret-bento scan . --output reports/secret-report.md
-```
-
-During development:
-
-```sh
-cargo run -- scan .
+secret-bento scan . --scanner builtin
+secret-bento scan . --scanner gitleaks
 ```
 
 Example output:
