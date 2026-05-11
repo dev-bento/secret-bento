@@ -1,5 +1,9 @@
 # Secret Bento
 
+[![Rust](https://github.com/dev-bento/secret-bento/actions/workflows/rust.yml/badge.svg)](https://github.com/dev-bento/secret-bento/actions/workflows/rust.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/dev-bento/secret-bento)](https://github.com/dev-bento/secret-bento/releases)
+
 Tiny local secret scanning reports for AI-assisted indie developers.
 
 Part of **Dev Bento**: tiny local CLIs for AI-assisted indie developers.
@@ -18,7 +22,7 @@ Secret Bento has a small v0.1 Rust CLI MVP. It can scan a local path with the de
 
 The `builtin` scanner is intentionally basic. It does not replace established secret scanners or professional security review.
 
-## Usage
+## Quick Start
 
 From a built local binary:
 
@@ -26,10 +30,38 @@ From a built local binary:
 secret-bento scan .
 ```
 
+Reduce local report noise from docs, tests, fixtures, and sample reports:
+
+```sh
+secret-bento scan . --exclude docs/** --exclude tests/**
+```
+
+Write the report to a custom path:
+
+```sh
+secret-bento scan . --output reports/secret-report.md
+```
+
+By default, Secret Bento writes `SECRET_BENTO_REPORT.md` at the scanned root.
+
+## Usage
+
 The scanner option is available now, with `builtin` as the default:
 
 ```sh
 secret-bento scan . --scanner builtin
+```
+
+You can provide multiple `--exclude <glob>` values to skip noisy local paths during scanning:
+
+```sh
+secret-bento scan . --exclude docs/** --exclude tests/** --exclude **/*.md
+```
+
+Use `--output <path>` to choose where the Markdown report is written. Relative output paths are resolved from the scanned root, and parent directories are created when needed:
+
+```sh
+secret-bento scan . --output reports/secret-report.md
 ```
 
 During development:

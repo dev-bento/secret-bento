@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased v0.1.2
+
+### Added
+- Added repeatable `--exclude <glob>` scan filters for reducing local noise from docs, tests, fixtures, and sample reports.
+- Added `--output <path>` for writing reports outside the default `SECRET_BENTO_REPORT.md` location.
+- Added README Quick Start examples and project badges.
+
 ## v0.1.1 - 2026-05-11
 
 ### Fixed

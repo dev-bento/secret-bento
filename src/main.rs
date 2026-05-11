@@ -71,11 +71,14 @@ impl ScannerKind {
 struct ScanOptions {
     scanner: ScannerKind,
     path: PathBuf,
+    excludes: Vec<String>,
+    output: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug)]
 struct ScanContext {
     root: PathBuf,
+    excludes: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -98,9 +101,14 @@ impl Scanner for BuiltinScanner {
 
     fn scan(&self, context: &ScanContext) -> Result<ScanResult, String> {
         let mut findings = Vec::new();
-        scan_path_recursive(&context.root, &context.root, &mut findings)
-            .map_err(|error| format!("failed while scanning files: {error}"))?;
-        findings.extend(check_env_file(&context.root));
+        scan_path_recursive(
+            &context.root,
+            &context.root,
+            &context.excludes,
+            &mut findings,
+        )
+        .map_err(|error| format!("failed while scanning files: {error}"))?;
+        findings.extend(check_env_file(&context.root, &context.excludes));
 
         Ok(ScanResult {
             scanner_name: self.name(),
@@ -129,12 +137,23 @@ fn run(args: Vec<String>) -> Result<(), String> {
 
     let root = fs::canonicalize(&options.path)
         .map_err(|error| format!("failed to resolve scan path: {error}"))?;
-    let context = ScanContext { root };
+    let context = ScanContext {
+        root,
+        excludes: options.excludes,
+    };
     let scanner = scanner_for(options.scanner);
     let result = scanner.scan(&context)?;
 
     let report = generate_report(&context.root, result.scanner_name, &result.findings);
-    let report_path = context.root.join(REPORT_FILE);
+    let report_path = resolve_report_path(&context.root, options.output.as_deref());
+    if let Some(parent) = report_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "failed to create report directory {}: {error}",
+                parent.display()
+            )
+        })?;
+    }
     fs::write(&report_path, report)
         .map_err(|error| format!("failed to write {}: {error}", report_path.display()))?;
 
@@ -149,10 +168,30 @@ fn parse_scan_options(args: &[String], program_name: &str) -> Result<ScanOptions
 
     let mut scanner = ScannerKind::Builtin;
     let mut path = None;
+    let mut excludes = Vec::new();
+    let mut output = None;
     let mut index = 2;
 
     while index < args.len() {
         match args[index].as_str() {
+            "--exclude" => {
+                index += 1;
+                let value = args.get(index).ok_or_else(|| usage(program_name))?;
+                excludes.push(value.to_string());
+            }
+            value if value.starts_with("--exclude=") => {
+                let value = value.trim_start_matches("--exclude=");
+                excludes.push(value.to_string());
+            }
+            "--output" => {
+                index += 1;
+                let value = args.get(index).ok_or_else(|| usage(program_name))?;
+                output = Some(PathBuf::from(value));
+            }
+            value if value.starts_with("--output=") => {
+                let value = value.trim_start_matches("--output=");
+                output = Some(PathBuf::from(value));
+            }
             "--scanner" => {
                 index += 1;
                 let value = args.get(index).ok_or_else(|| usage(program_name))?;
@@ -181,7 +220,12 @@ fn parse_scan_options(args: &[String], program_name: &str) -> Result<ScanOptions
 
     let path = path.ok_or_else(|| usage(program_name))?;
 
-    Ok(ScanOptions { scanner, path })
+    Ok(ScanOptions {
+        scanner,
+        path,
+        excludes,
+        output,
+    })
 }
 
 fn scanner_for(scanner: ScannerKind) -> Box<dyn Scanner> {
@@ -191,10 +235,17 @@ fn scanner_for(scanner: ScannerKind) -> Box<dyn Scanner> {
 }
 
 fn usage(program_name: &str) -> String {
-    format!("{program_name} scan <path> [--scanner builtin]")
+    format!(
+        "{program_name} scan <path> [--scanner builtin] [--exclude <glob>]... [--output <path>]"
+    )
 }
 
-fn scan_path_recursive(root: &Path, current: &Path, findings: &mut Vec<Finding>) -> io::Result<()> {
+fn scan_path_recursive(
+    root: &Path,
+    current: &Path,
+    excludes: &[String],
+    findings: &mut Vec<Finding>,
+) -> io::Result<()> {
     for entry_result in fs::read_dir(current)? {
         let entry = entry_result?;
         let path = entry.path();
@@ -204,8 +255,14 @@ fn scan_path_recursive(root: &Path, current: &Path, findings: &mut Vec<Finding>)
             if should_ignore_dir(entry.file_name().as_ref()) {
                 continue;
             }
-            scan_path_recursive(root, &path, findings)?;
-        } else if file_type.is_file() && should_scan_file(root, &path) {
+            if should_exclude_path(root, &path, excludes) {
+                continue;
+            }
+            scan_path_recursive(root, &path, excludes, findings)?;
+        } else if file_type.is_file()
+            && !should_exclude_path(root, &path, excludes)
+            && should_scan_file(root, &path)
+        {
             scan_file(root, &path, findings)?;
         }
     }
@@ -216,6 +273,103 @@ fn scan_path_recursive(root: &Path, current: &Path, findings: &mut Vec<Finding>)
 fn should_ignore_dir(name: &OsStr) -> bool {
     let name = name.to_string_lossy();
     IGNORED_DIRS.iter().any(|ignored| *ignored == name)
+}
+
+fn should_exclude_path(root: &Path, path: &Path, excludes: &[String]) -> bool {
+    let relative_path = match path.strip_prefix(root) {
+        Ok(relative_path) => relative_path,
+        Err(_) => path,
+    };
+    let normalized_path = normalize_path_for_glob(relative_path);
+
+    excludes
+        .iter()
+        .any(|pattern| glob_matches(pattern, &normalized_path))
+}
+
+fn normalize_path_for_glob(path: &Path) -> String {
+    path.components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn glob_matches(pattern: &str, path: &str) -> bool {
+    let pattern = pattern.replace('\\', "/");
+    let pattern_segments = pattern
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    let path_segments = path
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+
+    glob_segments_match(&pattern_segments, &path_segments)
+}
+
+fn glob_segments_match(pattern: &[&str], path: &[&str]) -> bool {
+    match pattern.split_first() {
+        None => path.is_empty(),
+        Some((pattern_segment, remaining_pattern)) if *pattern_segment == "**" => {
+            glob_segments_match(remaining_pattern, path)
+                || (!path.is_empty() && glob_segments_match(pattern, &path[1..]))
+        }
+        Some((pattern_segment, remaining_pattern)) => match path.split_first() {
+            Some((path_segment, remaining_path))
+                if glob_segment_matches(pattern_segment, path_segment) =>
+            {
+                glob_segments_match(remaining_pattern, remaining_path)
+            }
+            _ => false,
+        },
+    }
+}
+
+fn glob_segment_matches(pattern: &str, text: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+
+    if !pattern.contains('*') {
+        return pattern == text;
+    }
+
+    let parts = pattern.split('*').collect::<Vec<_>>();
+    let mut remaining = text;
+
+    if let Some(first) = parts.first() {
+        if !first.is_empty() {
+            if !remaining.starts_with(first) {
+                return false;
+            }
+            remaining = &remaining[first.len()..];
+        }
+    }
+
+    for part in parts.iter().skip(1).take(parts.len().saturating_sub(2)) {
+        if part.is_empty() {
+            continue;
+        }
+        match remaining.find(part) {
+            Some(index) => remaining = &remaining[index + part.len()..],
+            None => return false,
+        }
+    }
+
+    if let Some(last) = parts.last() {
+        last.is_empty() || remaining.ends_with(last)
+    } else {
+        true
+    }
+}
+
+fn resolve_report_path(root: &Path, output: Option<&Path>) -> PathBuf {
+    match output {
+        Some(path) if path.is_absolute() => path.to_path_buf(),
+        Some(path) => root.join(path),
+        None => root.join(REPORT_FILE),
+    }
 }
 
 fn should_scan_file(root: &Path, path: &Path) -> bool {
@@ -466,8 +620,11 @@ fn redact_line(line: &str) -> String {
     "<REDACTED>".to_string()
 }
 
-fn check_env_file(root: &Path) -> Vec<Finding> {
+fn check_env_file(root: &Path, excludes: &[String]) -> Vec<Finding> {
     let env_path = root.join(".env");
+    if should_exclude_path(root, &env_path, excludes) {
+        return Vec::new();
+    }
     if !env_path.exists() {
         return Vec::new();
     }
@@ -611,6 +768,25 @@ fn push_markdown_code_block(report: &mut String, content: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_scan_root(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = env::temp_dir().join(format!("secret-bento-{name}-{nonce}"));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn write_test_file(root: &Path, relative_path: &str, content: &str) {
+        let path = root.join(relative_path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, content).unwrap();
+    }
 
     #[test]
     fn detects_known_secret_prefixes() {
@@ -706,6 +882,135 @@ mod tests {
     }
 
     #[test]
+    fn exclude_pattern_skips_matching_paths() {
+        let root = temp_scan_root("single-exclude");
+        write_test_file(
+            &root,
+            "docs/guide.md",
+            "OPENAI_API_KEY=sk-docs-secret-value",
+        );
+        write_test_file(
+            &root,
+            "src/config.txt",
+            "OPENAI_API_KEY=sk-src-secret-value",
+        );
+
+        let mut findings = Vec::new();
+        scan_path_recursive(&root, &root, &["docs/**".to_string()], &mut findings).unwrap();
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].file, Some(PathBuf::from("src/config.txt")));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn multiple_excludes_skip_all_matching_paths() {
+        let root = temp_scan_root("multiple-excludes");
+        write_test_file(
+            &root,
+            "docs/guide.md",
+            "OPENAI_API_KEY=sk-docs-secret-value",
+        );
+        write_test_file(
+            &root,
+            "tests/fixture.txt",
+            "OPENAI_API_KEY=sk-test-secret-value",
+        );
+        write_test_file(
+            &root,
+            "src/config.txt",
+            "OPENAI_API_KEY=sk-src-secret-value",
+        );
+
+        let mut findings = Vec::new();
+        scan_path_recursive(
+            &root,
+            &root,
+            &["docs/**".to_string(), "tests/**".to_string()],
+            &mut findings,
+        )
+        .unwrap();
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].file, Some(PathBuf::from("src/config.txt")));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn markdown_glob_excludes_matching_files_anywhere() {
+        assert!(glob_matches("**/*.md", "README.md"));
+        assert!(glob_matches("**/*.md", "docs/sample-report.md"));
+        assert!(!glob_matches("**/*.md", "src/main.rs"));
+    }
+
+    #[test]
+    fn output_path_can_be_customized() {
+        let root = Path::new("repo");
+        let report_path = resolve_report_path(root, Some(Path::new("reports/secret-report.md")));
+
+        assert_eq!(
+            report_path,
+            PathBuf::from("repo").join("reports/secret-report.md")
+        );
+    }
+
+    #[test]
+    fn default_output_stays_at_scanned_root() {
+        let root = Path::new("repo");
+        let report_path = resolve_report_path(root, None);
+
+        assert_eq!(report_path, PathBuf::from("repo").join(REPORT_FILE));
+    }
+
+    #[test]
+    fn run_writes_custom_output_path_and_creates_parents() {
+        let root = temp_scan_root("custom-output");
+        write_test_file(
+            &root,
+            "src/config.txt",
+            "OPENAI_API_KEY=sk-src-secret-value",
+        );
+        let output = Path::new("reports").join("secret-report.md");
+
+        run(vec![
+            "secret-bento".to_string(),
+            "scan".to_string(),
+            root.display().to_string(),
+            "--output".to_string(),
+            output.display().to_string(),
+        ])
+        .unwrap();
+
+        assert!(root.join(output).exists());
+        assert!(!root.join(REPORT_FILE).exists());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn run_writes_default_output_at_scanned_root() {
+        let root = temp_scan_root("default-output");
+        write_test_file(
+            &root,
+            "src/config.txt",
+            "OPENAI_API_KEY=sk-src-secret-value",
+        );
+
+        run(vec![
+            "secret-bento".to_string(),
+            "scan".to_string(),
+            root.display().to_string(),
+        ])
+        .unwrap();
+
+        assert!(root.join(REPORT_FILE).exists());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn parses_default_builtin_scanner() {
         let args = vec![
             "secret-bento".to_string(),
@@ -716,6 +1021,8 @@ mod tests {
 
         assert_eq!(options.scanner, ScannerKind::Builtin);
         assert_eq!(options.path, PathBuf::from("."));
+        assert!(options.excludes.is_empty());
+        assert_eq!(options.output, None);
     }
 
     #[test]
@@ -730,6 +1037,27 @@ mod tests {
         let options = parse_scan_options(&args, "secret-bento").unwrap();
 
         assert_eq!(options.scanner, ScannerKind::Builtin);
+    }
+
+    #[test]
+    fn parses_exclude_and_output_options() {
+        let args = vec![
+            "secret-bento".to_string(),
+            "scan".to_string(),
+            ".".to_string(),
+            "--exclude".to_string(),
+            "docs/**".to_string(),
+            "--exclude=tests/**".to_string(),
+            "--output".to_string(),
+            "reports/secret-report.md".to_string(),
+        ];
+        let options = parse_scan_options(&args, "secret-bento").unwrap();
+
+        assert_eq!(options.excludes, vec!["docs/**", "tests/**"]);
+        assert_eq!(
+            options.output,
+            Some(PathBuf::from("reports/secret-report.md"))
+        );
     }
 
     #[test]
