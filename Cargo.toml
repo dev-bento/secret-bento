@@ -1,0 +1,9 @@
+[package]
+name = "secret-bento"
+version = "0.0.0"
+edition = "2021"
+description = "Tiny local secret scanning reports for AI-assisted indie developers."
+license = "MIT"
+repository = "https://github.com/dev-bento/secret-bento"
+
+[dependencies]

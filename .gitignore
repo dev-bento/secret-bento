@@ -1,0 +1,22 @@
+# Rust
+/target/
+Cargo.lock
+
+# Secret Bento output
+SECRET_BENTO_REPORT.md
+
+# Local env files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Editors and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
