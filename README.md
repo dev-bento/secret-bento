@@ -30,9 +30,17 @@ Secret Bento has a small Rust CLI. It can scan a local path with the default `bu
 
 The `builtin` scanner is intentionally basic. It does not replace established secret scanners or professional security review.
 
-## Try The Built-In Scanner Locally
+## Download
 
-From a built local binary, scan the current repository with the default `builtin` scanner:
+Download the latest binary for your platform from [GitHub Releases](https://github.com/dev-bento/secret-bento/releases). Release assets include SHA256 checksum files.
+
+After unpacking the archive, verify the binary:
+
+```sh
+secret-bento --version
+```
+
+Then scan the current repository with the default `builtin` scanner:
 
 ```sh
 secret-bento scan .
@@ -40,10 +48,10 @@ secret-bento scan .
 
 By default, Secret Bento writes `SECRET_BENTO_REPORT.md` at the scanned root. The built-in scanner is intentionally small and local-first. It is useful for quick checks before asking an AI assistant for remediation help, but it does not replace mature scanners or professional security review.
 
-During development:
+If Gitleaks is installed locally, use it as the detection engine for stronger scanner coverage:
 
 ```sh
-cargo run -- scan .
+secret-bento scan . --scanner gitleaks
 ```
 
 ## Use Gitleaks For Stronger Scanning
@@ -159,6 +167,20 @@ Example output:
 
 ```text
 SECRET_BENTO_REPORT.md
+```
+
+## Build From Source
+
+Building from source requires Rust and Cargo:
+
+```sh
+cargo run -- scan .
+```
+
+For a local release build:
+
+```sh
+cargo build --release
 ```
 
 ## Who It Is For

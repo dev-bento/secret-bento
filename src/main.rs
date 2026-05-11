@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Deserialize;
 
 const REPORT_FILE: &str = "SECRET_BENTO_REPORT.md";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 const IGNORED_DIRS: &[&str] = &[".git", "node_modules", ".next", "dist", "build", "target"];
 const GENERIC_SECRET_NAMES: &[&str] = &["API_KEY", "SECRET_KEY", "TOKEN", "DATABASE_URL"];
 const PLACEHOLDER_VALUES: &[&str] = &[
@@ -249,6 +250,14 @@ fn main() {
 
 fn run(args: Vec<String>) -> Result<RunOutcome, SecretBentoError> {
     let program_name = args.first().map_or("secret-bento", String::as_str);
+
+    if args.len() == 2 && matches!(args[1].as_str(), "--version" | "-V") {
+        println!("{program_name} {VERSION}");
+        return Ok(RunOutcome {
+            findings_found: false,
+        });
+    }
+
     let options = parse_scan_options(&args, program_name).map_err(SecretBentoError::Usage)?;
 
     if !options.path.exists() {
@@ -367,7 +376,7 @@ fn scanner_for(scanner: ScannerKind) -> Box<dyn Scanner> {
 
 fn usage(program_name: &str) -> String {
     format!(
-        "{program_name} scan <path> [--scanner builtin|gitleaks] [--exclude <glob>]... [--output <path>]"
+        "{program_name} --version\n{program_name} scan <path> [--scanner builtin|gitleaks] [--exclude <glob>]... [--output <path>]"
     )
 }
 
@@ -1291,6 +1300,14 @@ mod tests {
         assert!(root.join(REPORT_FILE).exists());
 
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn version_flag_exits_cleanly() {
+        let outcome = run(vec!["secret-bento".to_string(), "--version".to_string()]).unwrap();
+
+        assert_eq!(outcome.exit_code(), ExitCode::Clean);
+        assert!(!outcome.findings_found);
     }
 
     #[test]

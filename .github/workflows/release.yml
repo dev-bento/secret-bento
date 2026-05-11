@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+          - os: macos-14
+            target: aarch64-apple-darwin
+            archive: tar.gz
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify tag matches Cargo package version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $tagVersion = "${{ github.ref_name }}".TrimStart("v")
+          $versionLine = Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"' | Select-Object -First 1
+          $packageVersion = $versionLine.Matches[0].Groups[1].Value
+
+          if ($packageVersion -ne $tagVersion) {
+            throw "Tag version $tagVersion does not match Cargo package version $packageVersion."
+          }
+
+      - name: Install Rust
+        run: rustup default stable
+
+      - name: Install target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package release asset
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $tag = "${{ github.ref_name }}"
+          $target = "${{ matrix.target }}"
+          $assetName = "secret-bento-$tag-$target"
+          $staging = Join-Path $env:RUNNER_TEMP $assetName
+          $dist = Join-Path $PWD "dist"
+          $exe = if ($target -like "*windows*") { ".exe" } else { "" }
+
+          New-Item -ItemType Directory -Force -Path $staging, $dist | Out-Null
+          Copy-Item "target/$target/release/secret-bento$exe" $staging
+          Copy-Item README.md, LICENSE, CHANGELOG.md $staging
+
+          if ("${{ matrix.archive }}" -eq "zip") {
+            $assetPath = Join-Path $dist "$assetName.zip"
+            Compress-Archive -Path $staging -DestinationPath $assetPath -Force
+          } else {
+            $assetPath = Join-Path $dist "$assetName.tar.gz"
+            tar -czf $assetPath -C $env:RUNNER_TEMP $assetName
+          }
+
+          $hash = (Get-FileHash -Algorithm SHA256 $assetPath).Hash.ToLowerInvariant()
+          $assetFile = Split-Path $assetPath -Leaf
+          Set-Content -Path "$assetPath.sha256" -Value "$hash  $assetFile"
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*
