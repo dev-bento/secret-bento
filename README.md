@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/dev-bento/secret-bento)](https://github.com/dev-bento/secret-bento/releases)
 
-Tiny local secret scanning reports for AI-assisted indie developers.
+Local secret scanning reports for AI-assisted cleanup.
 
 Part of **Dev Bento**: tiny local CLIs for AI-assisted indie developers.
 
@@ -12,9 +12,17 @@ Don’t dump your repo. Pack it into a bento.
 
 ## What Is Secret Bento?
 
-Secret Bento is a tiny local CLI that scans a local repository for accidentally leaked secrets and generates an AI-ready remediation report in Markdown.
+Secret Bento is a small Rust CLI that scans a local repository for accidentally leaked secrets and writes a redacted Markdown report you can review before asking an AI assistant for cleanup help.
 
-It is not trying to invent secret scanning or replace mature OSS scanners. Secret Bento starts with simple built-in checks and is designed to integrate transparently with tools like gitleaks or other open source scanners in the future. The value is the report: safe context packaging, practical prioritization, and remediation guidance that is easy to hand to an AI assistant without uploading your codebase.
+It is built for indie developers, solo builders, and small teams who want a practical local check before sharing security context with ChatGPT, Claude, Codex, Cursor, Gemini, or another assistant.
+
+Secret Bento does three things:
+
+- runs locally against a repository path
+- detects possible secrets with the built-in scanner or a local Gitleaks install
+- turns findings into redacted, prioritized remediation guidance in Markdown
+
+It does not upload code, call AI APIs, automatically fix secrets, or replace mature scanners and professional security review. The value is the report: safe context packaging, practical prioritization, and remediation guidance that is easy to hand to an AI assistant without uploading your codebase.
 
 ## Current Status
 
