@@ -10,6 +10,40 @@ Part of **Dev Bento**: tiny local CLIs for AI-assisted indie developers.
 
 Don’t dump your repo. Pack it into a bento.
 
+## Quick Start
+
+Secret Bento is a local CLI that scans a repository for possible leaked secrets and writes a redacted Markdown cleanup report.
+
+It is for indie developers, solo builders, and small teams who use AI assistants but do not want to paste raw repository contents or credentials into chat.
+
+Download the latest binary for your platform from [GitHub Releases](https://github.com/dev-bento/secret-bento/releases). Release assets include SHA256 checksum files.
+
+For v0.3.0, release assets are named by platform:
+
+- `secret-bento-v0.3.0-x86_64-pc-windows-msvc.zip`
+- `secret-bento-v0.3.0-x86_64-unknown-linux-gnu.tar.gz`
+- `secret-bento-v0.3.0-aarch64-apple-darwin.tar.gz`
+
+After unpacking the archive, verify the binary:
+
+```sh
+secret-bento --version
+```
+
+Then scan the current repository with the default `builtin` scanner:
+
+```sh
+secret-bento scan .
+```
+
+Secret Bento writes `SECRET_BENTO_REPORT.md` at the scanned root. Review the report locally before sharing any excerpt with an AI assistant.
+
+For stronger detection, install Gitleaks separately and run:
+
+```sh
+secret-bento scan . --scanner gitleaks
+```
+
 ## What Is Secret Bento?
 
 Secret Bento is a small Rust CLI that scans a local repository for accidentally leaked secrets and writes a redacted Markdown report you can review before asking an AI assistant for cleanup help.
@@ -29,30 +63,6 @@ It does not upload code, call AI APIs, automatically fix secrets, or replace mat
 Secret Bento has a small Rust CLI. It can scan a local path with the default `builtin` scanner or orchestrate the external `gitleaks` CLI, normalize findings, and write a redacted Markdown remediation report.
 
 The `builtin` scanner is intentionally basic. It does not replace established secret scanners or professional security review.
-
-## Download
-
-Download the latest binary for your platform from [GitHub Releases](https://github.com/dev-bento/secret-bento/releases). Release assets include SHA256 checksum files.
-
-After unpacking the archive, verify the binary:
-
-```sh
-secret-bento --version
-```
-
-Then scan the current repository with the default `builtin` scanner:
-
-```sh
-secret-bento scan .
-```
-
-By default, Secret Bento writes `SECRET_BENTO_REPORT.md` at the scanned root. The built-in scanner is intentionally small and local-first. It is useful for quick checks before asking an AI assistant for remediation help, but it does not replace mature scanners or professional security review.
-
-If Gitleaks is installed locally, use it as the detection engine for stronger scanner coverage:
-
-```sh
-secret-bento scan . --scanner gitleaks
-```
 
 ## Use Gitleaks For Stronger Scanning
 
@@ -103,13 +113,56 @@ Secret Bento uses CI-friendly exit codes:
 | 2 | CLI usage or configuration error. |
 | 3 | Scanner execution, file IO, JSON parse, or internal error. |
 
-Example GitHub Actions step:
+Example GitHub Actions workflow:
+
+```yaml
+name: Secret scan
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  secret-bento:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Secret Bento
+        run: |
+          curl -L \
+            -o secret-bento.tar.gz \
+            https://github.com/dev-bento/secret-bento/releases/download/v0.3.0/secret-bento-v0.3.0-x86_64-unknown-linux-gnu.tar.gz
+          tar -xzf secret-bento.tar.gz
+          sudo install \
+            secret-bento-v0.3.0-x86_64-unknown-linux-gnu/secret-bento \
+            /usr/local/bin/secret-bento
+
+      - name: Verify Secret Bento
+        run: secret-bento --version
+
+      - name: Scan repository
+        run: secret-bento scan . --output reports/secret-bento.md
+
+      - name: Upload Secret Bento report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: secret-bento-report
+          path: reports/secret-bento.md
+          if-no-files-found: ignore
+```
+
+Exit code `1` means the scan completed and found possible secrets. GitHub Actions treats that as a failed step by default, which is useful for protected branches. The artifact step still runs so you can inspect the generated Markdown report before deciding what to rotate or clean up.
+
+To use Gitleaks in CI, install Gitleaks separately before the scan step, then run:
 
 ```sh
 secret-bento scan . --scanner gitleaks --output reports/secret-bento.md
 ```
-
-Exit code `1` means the scan completed and found possible secrets. Treat that as a CI failure for protected branches, then inspect the generated Markdown report locally or as a CI artifact.
 
 ## Hand The Report To An AI Assistant Safely
 

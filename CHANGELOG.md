@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased v0.2.1
+## v0.3.0 - 2026-05-11
+
+### Added
+- Added `secret-bento --version` using Cargo package metadata.
+- Added GitHub Actions release packaging for Windows x64, Linux x64, and Apple Silicon macOS.
+- Added release archives that include the binary, README, LICENSE, and CHANGELOG.
+- Added SHA256 checksum files for release assets.
+
+### Changed
+- Updated README usage guidance around binary downloads, first-run verification, local scans, Gitleaks scans, and GitHub Actions usage.
+
+## v0.2.1 - 2026-05-11
 
 ### Added
 - Added CI-friendly exit codes for clean scans, completed scans with findings, usage/configuration errors, and runtime failures.
