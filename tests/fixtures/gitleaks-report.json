@@ -6,7 +6,7 @@
     "StartColumn": 18,
     "EndColumn": 38,
     "Match": "AWS_ACCESS_KEY_ID=<raw secret omitted from normalized report>",
-    "Secret": "AKIAIOSFODNN7EXAMPLE",
+    "Secret": "FAKE_AWS_ACCESS_KEY_FOR_SECRET_BENTO_TEST",
     "File": "src/config.ts",
     "RuleID": "aws-access-token",
     "Fingerprint": "src/config.ts:aws-access-token:7"
@@ -16,6 +16,6 @@
     "StartLine": 12,
     "File": "README.md",
     "RuleID": "generic-api-key",
-    "Secret": "super-secret-fixture-value"
+    "Secret": "FAKE_GENERIC_API_KEY_FOR_SECRET_BENTO_TEST"
   }
 ]

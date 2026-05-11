@@ -151,7 +151,10 @@ impl Scanner for GitleaksScanner {
         let output = match output {
             Ok(output) => output,
             Err(error) if error.kind() == ErrorKind::NotFound => {
-                return Err("scanner `gitleaks` is not installed or not on PATH. Install gitleaks from https://github.com/gitleaks/gitleaks, then rerun `secret-bento scan <path> --scanner gitleaks`.".to_string());
+                return Err(
+                    "gitleaks is not installed or not available on PATH. Install gitleaks, or use --scanner builtin."
+                        .to_string(),
+                );
             }
             Err(error) => return Err(format!("failed to run gitleaks: {error}")),
         };
@@ -1273,8 +1276,8 @@ mod tests {
         );
 
         let normalized = format!("{findings:#?}");
-        assert!(!normalized.contains("AKIAIOSFODNN7EXAMPLE"));
-        assert!(!normalized.contains("super-secret-fixture-value"));
+        assert!(!normalized.contains("FAKE_AWS_ACCESS_KEY_FOR_SECRET_BENTO_TEST"));
+        assert!(!normalized.contains("FAKE_GENERIC_API_KEY_FOR_SECRET_BENTO_TEST"));
     }
 
     #[test]
@@ -1290,7 +1293,7 @@ mod tests {
         assert!(report.contains("- Risk: Gitleaks detected"));
         assert!(report.contains("- Remediation steps:"));
         assert!(report.contains("- Verification commands:"));
-        assert!(!report.contains("AKIAIOSFODNN7EXAMPLE"));
-        assert!(!report.contains("super-secret-fixture-value"));
+        assert!(!report.contains("FAKE_AWS_ACCESS_KEY_FOR_SECRET_BENTO_TEST"));
+        assert!(!report.contains("FAKE_GENERIC_API_KEY_FOR_SECRET_BENTO_TEST"));
     }
 }
