@@ -14,12 +14,22 @@ It is not trying to invent secret scanning. Secret Bento starts with simple loca
 
 ## Current Status
 
-Secret Bento is an early public placeholder. The repository includes a Rust CLI scaffold, product direction, roadmap, and sample report format, but scanning is not implemented yet.
+Secret Bento has a small v0.1 Rust CLI MVP. It can scan a local path for simple secret-like patterns and write a redacted Markdown report.
 
-## Planned Usage
+The scanner is intentionally basic. It does not replace established secret scanners or professional security review.
+
+## Usage
+
+From a built local binary:
 
 ```sh
 secret-bento scan .
+```
+
+During development:
+
+```sh
+cargo run -- scan .
 ```
 
 Example output:
@@ -46,16 +56,22 @@ Secret Bento prepares that context locally:
 - what remediation steps are likely needed
 - what can be safely shared with an AI assistant
 
-## Planned v0.1 Checks
+## v0.1 Checks
 
-The first version is planned to check for:
+The current MVP checks for:
 
 - possible hardcoded API keys
 - `.env` tracking risk
 - `.env.example` files containing real-looking values
 - README, docs, and logs containing secret-like values
+- OpenAI-style keys starting with `sk-`
+- Stripe secret keys starting with `sk_live_` or `sk_test_`
+- GitHub tokens starting with `ghp_` or `github_pat_`
+- AWS access key IDs starting with `AKIA`
+- Supabase service role style variable names
+- generic lines containing `API_KEY`, `SECRET_KEY`, `TOKEN`, or `DATABASE_URL` with non-placeholder values
 
-Findings should redact detected values by default.
+Findings redact detected values by default.
 
 ## What It Does Not Do
 
@@ -81,7 +97,7 @@ Secret Bento may integrate with existing open source secret scanners in future v
 
 ## Planned Rust CLI
 
-This repository includes a minimal Rust CLI scaffold and is expected to become a small Rust command-line tool.
+This repository includes a minimal Rust command-line tool.
 
 Possible future structure:
 

@@ -6,7 +6,7 @@ Generated: `2026-05-11T00:00:00Z`
 
 ## Report Status
 
-This is a sample of the intended Markdown output. Secret Bento is currently an early public placeholder, and scanning is not implemented yet.
+This is a sample of the intended Markdown output from the Secret Bento v0.1 MVP.
 
 ## Summary
 
