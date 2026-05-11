@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased v0.2.0
+## v0.2.0 - 2026-05-11
 
 ### Added
 - Added repeatable `--exclude <glob>` scan filters for reducing local noise from docs, tests, fixtures, and sample reports.

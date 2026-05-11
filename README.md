@@ -68,6 +68,30 @@ Secret Bento does not vendor or copy gitleaks rules. It runs `gitleaks detect --
 
 If `gitleaks` is not installed or not on `PATH`, Secret Bento exits with a clear missing-binary error.
 
+## Gitleaks Installation And PATH
+
+Secret Bento does not bundle Gitleaks. The `--scanner gitleaks` mode requires a locally installed `gitleaks` binary that is available on your `PATH`.
+
+If `gitleaks` is not installed or your shell cannot find it, either use the built-in scanner:
+
+```sh
+secret-bento scan . --scanner builtin
+```
+
+or install Gitleaks using an official or commonly accepted method for your operating system, then verify:
+
+```sh
+gitleaks version
+```
+
+After `gitleaks version` works in the same shell, rerun Secret Bento with:
+
+```sh
+secret-bento scan . --scanner gitleaks
+```
+
+Never paste raw secrets into AI chats. Secret Bento's Markdown report is designed to omit raw Gitleaks `Secret` and `Match` values, but you should still review reports locally before sharing excerpts.
+
 You can provide multiple `--exclude <glob>` values to skip noisy local paths during scanning:
 
 ```sh
