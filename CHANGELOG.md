@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.4.0 - 2026-05-12
 
 ### Changed
 - Split the Rust entrypoint into smaller core modules for findings, redaction, and Markdown report rendering.
