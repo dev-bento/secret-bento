@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- Split the Rust entrypoint into smaller core modules for findings, redaction, and Markdown report rendering.
+- Updated Gitleaks integration to read JSON from stdout with `--report-path -` instead of writing a raw JSON report file during normal operation.
+- Invoke Gitleaks with `--redact` so raw `Secret` and `Match` report fields are redacted before Secret Bento normalizes findings.
+
+### Added
+- Added sentinel regression tests to help ensure raw secret values do not appear in generated Markdown reports.
+
 ## v0.3.0 - 2026-05-11
 
 ### Added

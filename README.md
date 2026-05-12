@@ -18,11 +18,11 @@ It is for indie developers, solo builders, and small teams who use AI assistants
 
 Download the latest binary for your platform from [GitHub Releases](https://github.com/dev-bento/secret-bento/releases). Release assets include SHA256 checksum files.
 
-For v0.3.0, release assets are named by platform:
+Release assets are named by version and platform:
 
-- `secret-bento-v0.3.0-x86_64-pc-windows-msvc.zip`
-- `secret-bento-v0.3.0-x86_64-unknown-linux-gnu.tar.gz`
-- `secret-bento-v0.3.0-aarch64-apple-darwin.tar.gz`
+- `secret-bento-vX.Y.Z-x86_64-pc-windows-msvc.zip`
+- `secret-bento-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz`
+- `secret-bento-vX.Y.Z-aarch64-apple-darwin.tar.gz`
 
 After unpacking the archive, verify the binary:
 
@@ -86,7 +86,7 @@ Use Gitleaks as the detection engine when you want stronger scanner coverage:
 secret-bento scan . --scanner gitleaks
 ```
 
-Secret Bento does not bundle Gitleaks. The `--scanner gitleaks` mode shells out to a locally installed `gitleaks` binary, runs `gitleaks detect --report-format json --report-path <temp-file>`, parses the JSON report, drops raw secret values, and converts each result into a Secret Bento finding.
+Secret Bento does not bundle Gitleaks. The `--scanner gitleaks` mode shells out to a locally installed `gitleaks` binary, reads JSON from stdout with `gitleaks detect --report-format json --report-path - --redact`, ignores raw Gitleaks `Secret` and `Match` fields during normalization, and converts each result into a Secret Bento finding.
 
 Before using this mode, verify that Gitleaks is installed and available in the same shell:
 
@@ -172,10 +172,10 @@ jobs:
         run: |
           curl -L \
             -o secret-bento.tar.gz \
-            https://github.com/dev-bento/secret-bento/releases/download/v0.3.0/secret-bento-v0.3.0-x86_64-unknown-linux-gnu.tar.gz
+            https://github.com/dev-bento/secret-bento/releases/download/vX.Y.Z/secret-bento-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz
           tar -xzf secret-bento.tar.gz
           sudo install \
-            secret-bento-v0.3.0-x86_64-unknown-linux-gnu/secret-bento \
+            secret-bento-vX.Y.Z-x86_64-unknown-linux-gnu/secret-bento \
             /usr/local/bin/secret-bento
 
       - name: Verify Secret Bento
@@ -227,7 +227,7 @@ If that command fails, check that the directory containing the `gitleaks` binary
 When Gitleaks is missing or not on `PATH`, Secret Bento prints:
 
 ```text
-error: gitleaks is not installed or not available on PATH. Install gitleaks, or use --scanner builtin.
+error: gitleaks was not found on PATH. Gitleaks is optional, but recommended for stronger detection.
 ```
 
 Use the built-in scanner as a fallback while you fix the Gitleaks installation:
@@ -242,7 +242,7 @@ After `gitleaks version` works in the same shell, rerun Secret Bento with:
 secret-bento scan . --scanner gitleaks
 ```
 
-Never paste raw secrets into AI chats. Secret Bento's Markdown report is designed to omit raw Gitleaks `Secret` and `Match` values, but you should still review reports locally before sharing excerpts.
+Never paste raw secrets into AI chats. Secret Bento runs Gitleaks with redaction enabled and its Markdown report is designed to omit raw Gitleaks `Secret` and `Match` values, but you should still review reports locally before sharing excerpts.
 
 ## Usage Reference
 
@@ -312,6 +312,8 @@ Findings redact detected values by default.
 
 With `--scanner gitleaks`, Secret Bento uses gitleaks as the detection engine and focuses on orchestration, normalization, and safe remediation reporting.
 
+Secret Bento reads the Gitleaks JSON report from stdout using `--report-path -` and invokes Gitleaks with `--redact`. It does not persist a raw Gitleaks JSON report file as part of normal operation.
+
 Normalized report fields include:
 
 - scanner
@@ -326,7 +328,7 @@ Normalized report fields include:
 - remediation steps
 - verification commands
 
-Markdown reports do not include gitleaks raw `Secret` or `Match` values.
+Markdown reports do not include gitleaks raw `Secret` or `Match` values, and those fields are not used when normalizing Gitleaks findings.
 
 ## What It Does Not Do
 
@@ -354,14 +356,15 @@ Secret Bento integrates with gitleaks without maintaining its rule set. Future s
 
 This repository includes a minimal Rust command-line tool.
 
-Possible future structure:
+Current high-level structure:
 
 ```text
 src/
-  main.rs          CLI entrypoint
-  scanner.rs       local scanning orchestration
-  findings.rs      finding model and severity logic
-  report.rs        Markdown report generation
+  main.rs          thin process wrapper
+  lib.rs           CLI parsing, scan orchestration, and scanner adapters
+  finding.rs       finding model and severity labels
+  redaction.rs     redaction helpers
+  report.rs        Markdown report rendering
 ```
 
 ## Roadmap
