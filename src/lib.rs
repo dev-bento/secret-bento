@@ -5,7 +5,6 @@ use std::io;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 
@@ -21,6 +20,7 @@ const REPORT_FILE: &str = "SECRET_BENTO_REPORT.md";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const IGNORED_DIRS: &[&str] = &[".git", "node_modules", ".next", "dist", "build", "target"];
 const GENERIC_SECRET_NAMES: &[&str] = &["API_KEY", "SECRET_KEY", "TOKEN", "DATABASE_URL"];
+const MAX_GITLEAKS_ERROR_CHARS: usize = 500;
 const PLACEHOLDER_VALUES: &[&str] = &[
     "changeme",
     "change_me",
@@ -159,20 +159,9 @@ impl Scanner for GitleaksScanner {
     }
 
     fn scan(&self, context: &ScanContext) -> Result<ScanResult, String> {
-        let report_path = temporary_gitleaks_report_path();
         let source = context.root.display().to_string();
-        let report_path_arg = report_path.display().to_string();
-        let output = Command::new("gitleaks")
-            .args([
-                "detect",
-                "--source",
-                &source,
-                "--report-format",
-                "json",
-                "--report-path",
-                &report_path_arg,
-            ])
-            .output();
+        let args = gitleaks_detect_args(&source);
+        let output = Command::new("gitleaks").args(args).output();
 
         let output = match output {
             Ok(output) => output,
@@ -182,26 +171,7 @@ impl Scanner for GitleaksScanner {
             Err(error) => return Err(format!("failed to run gitleaks: {error}")),
         };
 
-        let report_exists = report_path.exists();
-        if !output.status.success() && output.status.code() != Some(1) {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let _ = fs::remove_file(&report_path);
-            return Err(format!("gitleaks failed: {}", stderr.trim()));
-        }
-
-        let json = if report_exists {
-            fs::read_to_string(&report_path).map_err(|error| {
-                format!(
-                    "failed to read gitleaks report {}: {error}",
-                    report_path.display()
-                )
-            })?
-        } else {
-            "[]".to_string()
-        };
-        let _ = fs::remove_file(&report_path);
-
-        let findings = parse_gitleaks_json(&json)?;
+        let findings = parse_gitleaks_stdout(output.status.code(), &output.stdout, &output.stderr)?;
 
         Ok(ScanResult {
             scanner_name: self.name(),
@@ -851,13 +821,63 @@ struct GitleaksJsonFinding {
     fingerprint: Option<String>,
 }
 
-fn temporary_gitleaks_report_path() -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
+fn gitleaks_detect_args(source: &str) -> Vec<String> {
+    vec![
+        "detect".to_string(),
+        "--source".to_string(),
+        source.to_string(),
+        "--report-format".to_string(),
+        "json".to_string(),
+        "--report-path".to_string(),
+        "-".to_string(),
+        "--redact".to_string(),
+        "--no-banner".to_string(),
+        "--no-color".to_string(),
+        "--log-level".to_string(),
+        "fatal".to_string(),
+    ]
+}
 
-    env::temp_dir().join(format!("secret-bento-gitleaks-{nonce}.json"))
+fn parse_gitleaks_stdout(
+    exit_code: Option<i32>,
+    stdout: &[u8],
+    stderr: &[u8],
+) -> Result<Vec<SecretBentoFinding>, String> {
+    match exit_code {
+        Some(0) | Some(1) => {
+            let json = String::from_utf8_lossy(stdout);
+            parse_gitleaks_json(&json)
+        }
+        _ => {
+            let message = sanitize_gitleaks_stderr(stderr);
+            if message.is_empty() {
+                Err(format!("gitleaks failed with exit code {exit_code:?}"))
+            } else {
+                Err(format!("gitleaks failed: {}", message.trim()))
+            }
+        }
+    }
+}
+
+fn sanitize_gitleaks_stderr(stderr: &[u8]) -> String {
+    let stderr = String::from_utf8_lossy(stderr);
+    let mut sanitized = stderr
+        .chars()
+        .map(|character| {
+            if character.is_control() && !matches!(character, '\n' | '\r' | '\t') {
+                ' '
+            } else {
+                character
+            }
+        })
+        .take(MAX_GITLEAKS_ERROR_CHARS)
+        .collect::<String>();
+
+    if stderr.chars().count() > MAX_GITLEAKS_ERROR_CHARS {
+        sanitized.push_str("...");
+    }
+
+    sanitized
 }
 
 fn parse_gitleaks_json(json: &str) -> Result<Vec<SecretBentoFinding>, String> {
@@ -1364,6 +1384,72 @@ mod tests {
     }
 
     #[test]
+    fn gitleaks_detect_args_write_redacted_json_to_stdout() {
+        let args = gitleaks_detect_args("/repo");
+
+        assert_eq!(
+            args,
+            vec![
+                "detect",
+                "--source",
+                "/repo",
+                "--report-format",
+                "json",
+                "--report-path",
+                "-",
+                "--redact",
+                "--no-banner",
+                "--no-color",
+                "--log-level",
+                "fatal",
+            ]
+        );
+    }
+
+    #[test]
+    fn gitleaks_stdout_exit_zero_parses_clean_report() {
+        let findings = parse_gitleaks_stdout(Some(0), b"[]", b"").unwrap();
+
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn gitleaks_stdout_exit_one_parses_findings_report() {
+        let json = include_str!("../tests/fixtures/gitleaks-report.json");
+        let findings = parse_gitleaks_stdout(Some(1), json.as_bytes(), b"").unwrap();
+
+        assert_eq!(findings.len(), 2);
+        assert_eq!(findings[0].scanner, "gitleaks");
+        assert_eq!(findings[0].rule_id.as_deref(), Some("aws-access-token"));
+    }
+
+    #[test]
+    fn gitleaks_runtime_error_does_not_echo_stdout() {
+        let raw_secret = "SENTINEL_RAW_SECRET_STDOUT_MUST_NOT_ECHO";
+        let error = parse_gitleaks_stdout(
+            Some(2),
+            format!("[{{\"Secret\":\"{raw_secret}\"}}]").as_bytes(),
+            b"fatal scanner error",
+        )
+        .unwrap_err();
+
+        assert!(error.contains("fatal scanner error"));
+        assert!(!error.contains(raw_secret));
+        assert!(!error.contains("Secret"));
+    }
+
+    #[test]
+    fn gitleaks_runtime_error_sanitizes_and_truncates_stderr() {
+        let stderr = format!("fatal\x07 scanner error {}", "x".repeat(600));
+        let error = parse_gitleaks_stdout(Some(2), b"[]", stderr.as_bytes()).unwrap_err();
+
+        assert!(error.contains("fatal  scanner error"));
+        assert!(error.ends_with("..."));
+        assert!(error.len() < stderr.len());
+        assert!(!error.contains('\x07'));
+    }
+
+    #[test]
     fn normalizes_gitleaks_fixture_without_raw_secret_values() {
         let json = include_str!("../tests/fixtures/gitleaks-report.json");
         let findings = parse_gitleaks_json(json).unwrap();
@@ -1400,5 +1486,29 @@ mod tests {
         assert!(report.contains("- Verification commands:"));
         assert!(!report.contains("FAKE_AWS_ACCESS_KEY_FOR_SECRET_BENTO_TEST"));
         assert!(!report.contains("FAKE_GENERIC_API_KEY_FOR_SECRET_BENTO_TEST"));
+    }
+
+    #[test]
+    fn gitleaks_stdout_sentinel_values_do_not_reach_report() {
+        let raw_secret = "SENTINEL_RAW_SECRET_GITLEAKS_STDOUT_123456";
+        let json = format!(
+            r#"[
+  {{
+    "Description": "Probe sentinel",
+    "StartLine": 1,
+    "File": "config.txt",
+    "RuleID": "probe-sentinel",
+    "Secret": "{raw_secret}",
+    "Match": "token = {raw_secret}",
+    "Fingerprint": "config.txt:probe-sentinel:1"
+  }}
+]"#
+        );
+        let findings = parse_gitleaks_stdout(Some(1), json.as_bytes(), b"").unwrap();
+        let normalized = format!("{findings:#?}");
+        let report = generate_report(Path::new("/repo"), "gitleaks", &findings);
+
+        assert!(!normalized.contains(raw_secret));
+        assert!(!report.contains(raw_secret));
     }
 }
