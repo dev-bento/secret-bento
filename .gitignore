@@ -13,6 +13,9 @@ SECRET_BENTO_REPORT.md
 # Logs
 *.log
 
+# Local-only working files
+/local/
+
 # Editors and OS files
 .DS_Store
 Thumbs.db
