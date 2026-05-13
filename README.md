@@ -72,6 +72,14 @@ Secret Bento does three things:
 
 It does not upload code, call AI APIs, automatically fix secrets, or replace mature scanners and professional security review. The value is the report: safe context packaging, practical prioritization, and remediation guidance that is easy to hand to an AI assistant without uploading your codebase.
 
+## Starter Kit
+
+Secret Bento CLI is open source.
+
+If you want the full workflow package, the paid Secret Bento Starter Kit is a separate package that includes setup guides, AI handoff prompts, checklists, GitHub Actions templates, and sanitized examples.
+
+Get the Starter Kit: https://hunon.gumroad.com/l/secret-bento-starter-kit
+
 ## Current Status
 
 Secret Bento has a small Rust CLI. It can scan a local path with the default `builtin` scanner or orchestrate the external `gitleaks` CLI, normalize findings, and write a redacted Markdown remediation report.
