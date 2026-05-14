@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.5.0 - 2026-05-14
 
 ### Added
 - Added concise CLI help for top-level, scan, and doctor commands.
