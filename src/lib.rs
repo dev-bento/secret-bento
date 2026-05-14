@@ -181,7 +181,17 @@ impl Scanner for GitleaksScanner {
 }
 
 pub fn run(args: Vec<String>) -> Result<RunOutcome, SecretBentoError> {
-    let program_name = args.first().map_or("secret-bento", String::as_str);
+    let program_name = args
+        .first()
+        .map(|value| display_program_name(value))
+        .unwrap_or_else(|| "secret-bento".to_string());
+
+    if args.len() == 2 && is_help_arg(&args[1]) {
+        println!("{}", help(&program_name));
+        return Ok(RunOutcome {
+            findings_found: false,
+        });
+    }
 
     if args.len() == 2 && matches!(args[1].as_str(), "--version" | "-V") {
         println!("{program_name} {VERSION}");
@@ -190,14 +200,34 @@ pub fn run(args: Vec<String>) -> Result<RunOutcome, SecretBentoError> {
         });
     }
 
-    if args.len() == 2 && args[1] == "doctor" {
+    if args.len() >= 2 && args[1] == "doctor" {
+        if args.len() == 3 && is_help_arg(&args[2]) {
+            println!("{}", doctor_help(&program_name));
+            return Ok(RunOutcome {
+                findings_found: false,
+            });
+        }
+        if args.len() != 2 {
+            return Err(SecretBentoError::Usage(format!(
+                "unexpected argument for `doctor`: {}\n\n{}",
+                args[2],
+                doctor_usage(&program_name)
+            )));
+        }
         println!("{}", doctor_report(detect_gitleaks_version()));
         return Ok(RunOutcome {
             findings_found: false,
         });
     }
 
-    let options = parse_scan_options(&args, program_name).map_err(SecretBentoError::Usage)?;
+    if args.len() >= 3 && args[1] == "scan" && is_help_arg(&args[2]) {
+        println!("{}", scan_help(&program_name));
+        return Ok(RunOutcome {
+            findings_found: false,
+        });
+    }
+
+    let options = parse_scan_options(&args, &program_name).map_err(SecretBentoError::Usage)?;
 
     if !options.path.exists() {
         return Err(SecretBentoError::Usage(format!(
@@ -233,15 +263,30 @@ pub fn run(args: Vec<String>) -> Result<RunOutcome, SecretBentoError> {
         ))
     })?;
 
-    println!("Generated {}", report_path.display());
+    print_scan_summary(result.scanner_name, &report_path, result.findings.len());
     Ok(RunOutcome {
         findings_found: !result.findings.is_empty(),
     })
 }
 
 fn parse_scan_options(args: &[String], program_name: &str) -> Result<ScanOptions, String> {
-    if args.len() < 3 || args[1] != "scan" {
-        return Err(usage(program_name));
+    if args.len() < 2 {
+        return Err(format!("missing command\n\n{}", usage(program_name)));
+    }
+
+    if args[1] != "scan" {
+        return Err(format!(
+            "unknown command `{}`\n\n{}",
+            args[1],
+            usage(program_name)
+        ));
+    }
+
+    if args.len() < 3 {
+        return Err(format!(
+            "scan requires a path\n\n{}",
+            scan_usage(program_name)
+        ));
     }
 
     let mut scanner = ScannerKind::Builtin;
@@ -254,40 +299,72 @@ fn parse_scan_options(args: &[String], program_name: &str) -> Result<ScanOptions
         match args[index].as_str() {
             "--exclude" => {
                 index += 1;
-                let value = args.get(index).ok_or_else(|| usage(program_name))?;
+                let value = args.get(index).ok_or_else(|| {
+                    format!(
+                        "missing value for `--exclude`\n\n{}",
+                        scan_usage(program_name)
+                    )
+                })?;
                 excludes.push(value.to_string());
             }
             value if value.starts_with("--exclude=") => {
                 let value = value.trim_start_matches("--exclude=");
+                if value.is_empty() {
+                    return Err(format!(
+                        "missing value for `--exclude`\n\n{}",
+                        scan_usage(program_name)
+                    ));
+                }
                 excludes.push(value.to_string());
             }
             "--output" => {
                 index += 1;
-                let value = args.get(index).ok_or_else(|| usage(program_name))?;
+                let value = args.get(index).ok_or_else(|| {
+                    format!(
+                        "missing value for `--output`\n\n{}",
+                        scan_usage(program_name)
+                    )
+                })?;
                 output = Some(PathBuf::from(value));
             }
             value if value.starts_with("--output=") => {
                 let value = value.trim_start_matches("--output=");
+                if value.is_empty() {
+                    return Err(format!(
+                        "missing value for `--output`\n\n{}",
+                        scan_usage(program_name)
+                    ));
+                }
                 output = Some(PathBuf::from(value));
             }
             "--scanner" => {
                 index += 1;
-                let value = args.get(index).ok_or_else(|| usage(program_name))?;
-                scanner = ScannerKind::parse(value)?;
+                let value = args.get(index).ok_or_else(|| {
+                    format!(
+                        "missing value for `--scanner`\n\n{}",
+                        scan_usage(program_name)
+                    )
+                })?;
+                scanner = ScannerKind::parse(value)
+                    .map_err(|error| format!("{error}\n\n{}", scan_usage(program_name)))?;
             }
             value if value.starts_with("--scanner=") => {
                 let value = value.trim_start_matches("--scanner=");
-                scanner = ScannerKind::parse(value)?;
+                scanner = ScannerKind::parse(value)
+                    .map_err(|error| format!("{error}\n\n{}", scan_usage(program_name)))?;
             }
             value if value.starts_with("--") => {
                 return Err(format!(
                     "unknown option `{value}`\n\n{}",
-                    usage(program_name)
+                    scan_usage(program_name)
                 ));
             }
             value => {
                 if path.is_some() {
-                    return Err(usage(program_name));
+                    return Err(format!(
+                        "duplicate scan path `{value}`; scan accepts exactly one path\n\n{}",
+                        scan_usage(program_name)
+                    ));
                 }
                 path = Some(PathBuf::from(value));
             }
@@ -296,7 +373,8 @@ fn parse_scan_options(args: &[String], program_name: &str) -> Result<ScanOptions
         index += 1;
     }
 
-    let path = path.ok_or_else(|| usage(program_name))?;
+    let path =
+        path.ok_or_else(|| format!("scan requires a path\n\n{}", scan_usage(program_name)))?;
 
     Ok(ScanOptions {
         scanner,
@@ -304,6 +382,21 @@ fn parse_scan_options(args: &[String], program_name: &str) -> Result<ScanOptions
         excludes,
         output,
     })
+}
+
+fn is_help_arg(value: &str) -> bool {
+    matches!(value, "help" | "--help" | "-h")
+}
+
+fn display_program_name(value: &str) -> String {
+    let name = Path::new(value)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("secret-bento")
+        .to_string();
+
+    name.strip_suffix(".exe").unwrap_or(&name).to_string()
 }
 
 fn scanner_for(scanner: ScannerKind) -> Box<dyn Scanner> {
@@ -315,8 +408,65 @@ fn scanner_for(scanner: ScannerKind) -> Box<dyn Scanner> {
 
 fn usage(program_name: &str) -> String {
     format!(
-        "{program_name} --version\n{program_name} doctor\n{program_name} scan <path> [--scanner builtin|gitleaks] [--exclude <glob>]... [--output <path>]"
+        "Usage:\n  {program_name} help\n  {program_name} --version\n  {program_name} doctor\n  {program_name} scan <path> [--scanner builtin|gitleaks] [--exclude <glob>]... [--output <path>]"
     )
+}
+
+fn scan_usage(program_name: &str) -> String {
+    format!(
+        "Usage:\n  {program_name} scan <path> [--scanner builtin|gitleaks] [--exclude <glob>]... [--output <path>]\n\nRun `{program_name} scan --help` for examples."
+    )
+}
+
+fn doctor_usage(program_name: &str) -> String {
+    format!("Usage:\n  {program_name} doctor")
+}
+
+fn help(program_name: &str) -> String {
+    format!(
+        "Secret Bento\n\nLocal secret scanning reports for AI-assisted cleanup.\n\nCommands:\n  help              Show this help.\n  doctor            Check local setup.\n  scan <path>       Scan a local path and write a redacted Markdown report.\n  --version         Print the Secret Bento version.\n\nExamples:\n  {program_name} doctor\n  {program_name} scan .\n  {program_name} scan . --scanner gitleaks --output reports/secret-bento.md\n\nNotes:\n  builtin scanner is a no-dependency smoke check.\n  gitleaks is recommended for stronger detection.\n  Reports are redacted summaries, not raw scanner output.\n\nRun `{program_name} scan --help` for scan options."
+    )
+}
+
+fn scan_help(program_name: &str) -> String {
+    format!(
+        "Secret Bento scan\n\nScan a local path and write a redacted Markdown report.\n\nUsage:\n  {program_name} scan <path> [options]\n\nOptions:\n  --scanner builtin|gitleaks   Select scanner. Default: builtin.\n  --output <path>              Write report to a custom Markdown path.\n  --exclude <glob>             Exclude a path pattern from the builtin scanner. Repeatable.\n  -h, --help                   Show this help.\n\nExamples:\n  {program_name} scan .\n  {program_name} scan . --scanner gitleaks\n  {program_name} scan . --exclude docs/** --output reports/secret-bento.md\n\nNotes:\n  builtin scanner is a no-dependency smoke check.\n  gitleaks is recommended for stronger detection.\n  Reports are redacted summaries, not raw scanner output."
+    )
+}
+
+fn doctor_help(program_name: &str) -> String {
+    format!(
+        "Secret Bento doctor\n\nCheck local Secret Bento setup and whether gitleaks is available on PATH.\n\nUsage:\n  {program_name} doctor"
+    )
+}
+
+fn print_scan_summary(scanner_name: &str, report_path: &Path, finding_count: usize) {
+    let exit_code = if finding_count == 0 {
+        ExitCode::Clean
+    } else {
+        ExitCode::Findings
+    };
+    let exit_meaning = if finding_count == 0 {
+        "clean scan"
+    } else {
+        "findings detected"
+    };
+
+    println!("Secret Bento scan complete");
+    println!();
+    println!("Scanner: {scanner_name}");
+    println!("Report: {}", report_path.display());
+    println!("Findings: {finding_count} total");
+    println!("Exit code: {} = {exit_meaning}", exit_code.as_i32());
+    if scanner_name == "builtin" {
+        println!();
+        println!("Note: builtin scanner is a smoke check. Use `--scanner gitleaks` for stronger detection.");
+    }
+    println!();
+    println!("Next:");
+    println!("- Review the redacted report locally.");
+    println!("- Do not paste raw secrets into AI chat.");
+    println!("- Re-run the scan after cleanup.");
 }
 
 fn detect_gitleaks_version() -> Option<String> {
@@ -1079,11 +1229,25 @@ mod tests {
     fn report_includes_required_sections() {
         let report = generate_report(Path::new("/repo"), "builtin", &[]);
 
+        assert!(report.contains("## Report Status"));
         assert!(report.contains("## Summary"));
         assert!(report.contains("## Findings"));
         assert!(report.contains("## Safety Note"));
         assert!(report.contains("## Suggested Remediation"));
         assert!(report.contains("## AI Handoff Prompt"));
+        assert!(report.contains("## Final Verification"));
+        assert!(report.contains("- Scanner: `builtin`"));
+        assert!(report.contains("- Report type: redacted summary"));
+        assert!(
+            report.contains("- Redaction status: raw secret values are not intentionally rendered")
+        );
+        assert!(report.contains(
+            "- Local-first note: generated locally without uploading code or calling AI APIs"
+        ));
+        assert!(report.contains(
+            "- Re-run Secret Bento with the same scanner: `secret-bento scan <path> --scanner builtin`"
+        ));
+        assert!(report.contains("- Do not paste raw secrets into AI chat."));
     }
 
     #[test]
@@ -1104,6 +1268,8 @@ mod tests {
         };
         let report = generate_report(Path::new("/repo"), "builtin", &[finding]);
 
+        assert!(report.contains("### SB-001. Possible OpenAI API Key"));
+        assert!(report.contains("- ID: `SB-001`"));
         assert!(report.contains("- Description: OPENAI_API_KEY=<REDACTED>"));
         assert!(!report.contains("- Evidence:"));
     }
@@ -1116,6 +1282,12 @@ mod tests {
         let findings = detect_line(root, path, 3, &format!("OPENAI_API_KEY=\"{raw_secret}\""));
         let report = generate_report(root, "builtin", &findings);
 
+        assert!(report.contains("### SB-001. Possible OpenAI API Key"));
+        assert!(report.contains("- ID: `SB-001`"));
+        assert!(report.contains("- Report type: redacted summary"));
+        assert!(
+            report.contains("- Redaction status: raw secret values are not intentionally rendered")
+        );
         assert!(report.contains("- Description: OPENAI_API_KEY=<REDACTED>"));
         assert_report_omits_raw_secret(&report, raw_secret);
     }
@@ -1477,6 +1649,14 @@ mod tests {
         let findings = parse_gitleaks_json(json).unwrap();
         let report = generate_report(Path::new("/repo"), "gitleaks", &findings);
 
+        assert!(report.contains("### SB-001. Possible Aws Access Token"));
+        assert!(report.contains("### SB-002. Possible Generic Api Key"));
+        assert!(report.contains("- ID: `SB-001`"));
+        assert!(report.contains("- ID: `SB-002`"));
+        assert!(report.contains("- Report type: redacted summary"));
+        assert!(report.contains(
+            "- Re-run Secret Bento with the same scanner: `secret-bento scan <path> --scanner gitleaks`"
+        ));
         assert!(report.contains("- Scanner: `gitleaks`"));
         assert!(report.contains("- Rule ID: `aws-access-token`"));
         assert!(report.contains("- Secret type: Aws Access Token"));

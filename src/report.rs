@@ -22,6 +22,13 @@ pub(crate) fn generate_report(
 
     let mut report = String::new();
     report.push_str("# Secret Bento Report\n\n");
+    report.push_str("## Report Status\n\n");
+    report.push_str(&format!("- Scanner: `{scanner_name}`\n"));
+    report.push_str("- Report type: redacted summary\n");
+    report.push_str("- Redaction status: raw secret values are not intentionally rendered\n");
+    report.push_str(
+        "- Local-first note: generated locally without uploading code or calling AI APIs\n",
+    );
     report.push_str(&format!("Scanned path: `{}`\n\n", root.display()));
     report.push_str(&format!("Scanner: `{scanner_name}`\n\n"));
     report.push_str("## Summary\n\n");
@@ -41,7 +48,9 @@ pub(crate) fn generate_report(
         report.push_str("No findings were detected by the selected scanner. This does not guarantee that the repository has no secrets.\n\n");
     } else {
         for (index, finding) in findings.iter().enumerate() {
-            report.push_str(&format!("### {}. {}\n\n", index + 1, finding.title));
+            let display_id = finding_display_id(index);
+            report.push_str(&format!("### {display_id}. {}\n\n", finding.title));
+            report.push_str(&format!("- ID: `{display_id}`\n"));
             report.push_str(&format!("- Scanner: `{}`\n", finding.scanner));
             if let Some(rule_id) = &finding.rule_id {
                 report.push_str(&format!("- Rule ID: `{rule_id}`\n"));
@@ -84,8 +93,21 @@ pub(crate) fn generate_report(
     report.push_str("I scanned my local repository with Secret Bento. The report below contains redacted possible secret exposure findings. Please help me prioritize remediation steps, identify which credentials likely need rotation, and draft a safe cleanup checklist. Do not ask me to reveal any secret values.\n");
     report.push_str("```\n\n");
 
+    report.push_str("## Final Verification\n\n");
+    report.push_str(&format!(
+        "- Re-run Secret Bento with the same scanner: `secret-bento scan <path> --scanner {scanner_name}`\n"
+    ));
+    report.push_str(
+        "- Review `git diff` and `git status --short` before committing cleanup changes.\n",
+    );
+    report.push_str("- Do not paste raw secrets into AI chat.\n\n");
+
     report.push_str("## Notes\n\n");
     report.push_str("Secret Bento is local-first and Markdown-first. It does not upload code, does not call AI APIs, and does not automatically fix files.\n");
 
     report
+}
+
+fn finding_display_id(index: usize) -> String {
+    format!("SB-{:03}", index + 1)
 }
