@@ -1,89 +1,110 @@
 # Secret Bento Report
 
-Repository: `example-app`
-Scanned path: `.`
-Scanner: `builtin`
-Generated: `2026-05-11T00:00:00Z`
-
 ## Report Status
 
-This is a sample of the intended Markdown output from the Secret Bento v0.1 MVP.
+- Scanner: `builtin`
+- Report type: redacted summary
+- Redaction status: raw secret values are not intentionally rendered
+- Local-first note: generated locally without uploading code or calling AI APIs
+Scanned path: `example-app`
+
+Scanner: `builtin`
 
 ## Summary
 
-Secret Bento found possible secret exposure risks that should be reviewed locally before asking an AI assistant for help.
+Secret Bento generated this AI-ready remediation report locally without uploading code or calling AI APIs.
+
+Secret Bento orchestrates local scanners, normalizes findings, and writes redacted Markdown context for remediation. It does not replace professional security review.
 
 | Severity | Count |
 | --- | ---: |
 | High | 1 |
-| Medium | 2 |
+| Medium | 1 |
 | Low | 1 |
 
 ## Safety Note
 
-Never paste real secrets into AI chats. This report redacts detected values and includes only enough context to support remediation planning.
+Never paste real secrets into AI chats. This report redacts detected values by default, but you should still review it locally before sharing any excerpt with ChatGPT, Claude, Codex, Cursor, Gemini, or another AI assistant.
 
 ## Findings
 
-### 1. Possible Hardcoded API Key
+### SB-001. Possible OpenAI API Key
 
+- ID: `SB-001`
+- Scanner: `builtin`
 - Severity: High
-- Confidence: Medium
-- File: `src/config.ts`
+- File: `src/config.example`
 - Line: 14
-- Evidence: `OPENAI_API_KEY = "sk-...REDACTED"`
-- Why it matters: A hardcoded API key may be exposed to anyone with repository access and may appear in git history.
-- Suggested remediation:
-  - Revoke or rotate the key in the provider dashboard.
-  - Move the value to a local `.env` file or secret manager.
-  - Confirm `.env` is ignored by git.
-  - Check git history if the key was already committed.
+- Secret type: OpenAI API Key
+- Description: OPENAI_API_KEY=<REDACTED>
+- Risk: An OpenAI-style API key may allow API usage billed to the key owner.
+- Remediation steps:
+  - Review the value locally and confirm whether it is real.
+  - Revoke or rotate the credential if it was committed or shared.
+  - Move real secrets to a local `.env` file or secret manager.
+  - Check git history if the value may have been committed.
+- Verification commands:
+  - `git status --short`
+  - `git log --all -- <file>`
 
-### 2. Tracked `.env` Risk
+### SB-002. Tracked `.env` Risk
 
+- ID: `SB-002`
+- Scanner: `builtin`
 - Severity: Medium
-- Confidence: High
 - File: `.env`
-- Line: 1
-- Evidence: `.env` appears to exist in the scanned repository.
-- Why it matters: Environment files often contain deploy tokens, database URLs, or API credentials.
-- Suggested remediation:
-  - Stop tracking `.env`.
+- Secret type: Environment File
+- Description: `.env` file exists in the scanned repository path.
+- Risk: Environment files often contain deploy tokens, database URLs, API credentials, or other private configuration.
+- Remediation steps:
+  - Confirm whether `.env` is tracked by git.
+  - Stop tracking `.env` if it contains local or production configuration.
   - Add `.env` and `.env.*` to `.gitignore`, while allowing `.env.example`.
-  - Create a sanitized `.env.example` for required variable names.
+  - Create a sanitized `.env.example` with placeholder values only.
+- Verification commands:
+  - `git status --short`
+  - `git ls-files -- .env`
 
-### 3. Real-Looking Value In `.env.example`
+### SB-003. Secret-Like Value In Documentation
 
-- Severity: Medium
-- Confidence: Medium
-- File: `.env.example`
-- Line: 3
-- Evidence: `STRIPE_SECRET_KEY=sk_live_...REDACTED`
-- Why it matters: Example files should use fake placeholder values. Real-looking values can be copied into production or accidentally expose credentials.
-- Suggested remediation:
-  - Replace with a clearly fake value such as `STRIPE_SECRET_KEY=replace_me`.
-  - Document where developers should obtain the real value.
-
-### 4. Secret-Like Value In Documentation
-
+- ID: `SB-003`
+- Scanner: `builtin`
 - Severity: Low
-- Confidence: Low
 - File: `README.md`
 - Line: 42
-- Evidence: `DATABASE_URL=postgres://user:...REDACTED`
-- Why it matters: Documentation sometimes contains copied local commands or logs with credentials.
-- Suggested remediation:
-  - Replace the example with a fake credential.
-  - Avoid including real hostnames, usernames, or passwords in public docs.
+- Secret type: Generic Secret-Like Value
+- Description: EXAMPLE_SERVICE_TOKEN=<REDACTED>
+- Risk: Documentation sometimes contains copied local commands or logs with credentials.
+- Remediation steps:
+  - Replace the example with an obvious placeholder value.
+  - Avoid including real hostnames, usernames, passwords, or provider-issued credentials in public docs.
+  - Re-run the scan after updating documentation examples.
+- Verification commands:
+  - `git diff -- README.md`
+  - `secret-bento scan .`
+
+## Suggested Remediation
+
+- Review each finding locally and confirm whether the value is real.
+- Revoke or rotate any credential that was committed, shared, or exposed.
+- Move real secrets into local environment files or a secret manager.
+- Keep `.env` files untracked and maintain a sanitized `.env.example`.
+- Review git history when a real secret may have been committed.
 
 ## AI Handoff Prompt
 
-You can paste the following prompt into an AI assistant after manually confirming that all detected values are redacted:
+After confirming this report contains no real secret values, you can paste the prompt below into an AI assistant:
 
 ```text
 I scanned my local repository with Secret Bento. The report below contains redacted possible secret exposure findings. Please help me prioritize remediation steps, identify which credentials likely need rotation, and draft a safe cleanup checklist. Do not ask me to reveal any secret values.
 ```
 
+## Final Verification
+
+- Re-run Secret Bento with the same scanner: `secret-bento scan <path> --scanner builtin`
+- Review `git diff` and `git status --short` before committing cleanup changes.
+- Do not paste raw secrets into AI chat.
+
 ## Notes
 
-Secret Bento reports are local-first and Markdown-first. Secret Bento does not upload code, does not call AI APIs, and does not automatically fix secrets.
+Secret Bento is local-first and Markdown-first. It does not upload code, does not call AI APIs, and does not automatically fix files.
