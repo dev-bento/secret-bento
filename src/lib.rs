@@ -13,7 +13,7 @@ mod redaction;
 mod report;
 
 use finding::{SecretBentoFinding, Severity};
-use redaction::redact_line;
+use redaction::{redact_line, redact_token_shaped_values};
 use report::generate_report;
 
 const REPORT_FILE: &str = "SECRET_BENTO_REPORT.md";
@@ -1011,7 +1011,7 @@ fn parse_gitleaks_stdout(
 
 fn sanitize_gitleaks_stderr(stderr: &[u8]) -> String {
     let stderr = String::from_utf8_lossy(stderr);
-    let mut sanitized = stderr
+    let control_cleaned = stderr
         .chars()
         .map(|character| {
             if character.is_control() && !matches!(character, '\n' | '\r' | '\t') {
@@ -1020,10 +1020,14 @@ fn sanitize_gitleaks_stderr(stderr: &[u8]) -> String {
                 character
             }
         })
+        .collect::<String>();
+    let token_redacted = redact_token_shaped_values(&control_cleaned);
+    let mut sanitized = token_redacted
+        .chars()
         .take(MAX_GITLEAKS_ERROR_CHARS)
         .collect::<String>();
 
-    if stderr.chars().count() > MAX_GITLEAKS_ERROR_CHARS {
+    if token_redacted.chars().count() > MAX_GITLEAKS_ERROR_CHARS {
         sanitized.push_str("...");
     }
 
@@ -1619,6 +1623,24 @@ mod tests {
         assert!(error.ends_with("..."));
         assert!(error.len() < stderr.len());
         assert!(!error.contains('\x07'));
+    }
+
+    #[test]
+    fn gitleaks_runtime_error_redacts_token_shaped_stderr_values() {
+        let token = ["sk", "diagnostic", "sentinel", "value"].join("-");
+        let stdout_sentinel = "SENTINEL_STDOUT_STILL_MUST_NOT_ECHO";
+        let stderr = format!("fatal scanner error near {token}");
+        let error = parse_gitleaks_stdout(
+            Some(2),
+            format!("[{{\"Secret\":\"{stdout_sentinel}\"}}]").as_bytes(),
+            stderr.as_bytes(),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("fatal scanner error near <REDACTED>"));
+        assert!(!error.contains(&token));
+        assert!(!error.contains(stdout_sentinel));
+        assert!(!error.contains("Secret"));
     }
 
     #[test]
