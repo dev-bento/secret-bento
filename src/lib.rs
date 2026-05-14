@@ -207,14 +207,22 @@ pub fn run(args: Vec<String>) -> Result<RunOutcome, SecretBentoError> {
                 findings_found: false,
             });
         }
-        if args.len() != 2 {
+        if args.len() > 3 {
             return Err(SecretBentoError::Usage(format!(
                 "unexpected argument for `doctor`: {}\n\n{}",
                 args[2],
                 doctor_usage(&program_name)
             )));
         }
-        println!("{}", doctor_report(detect_gitleaks_version()));
+        if args.len() == 3 && args[2].starts_with("--") {
+            return Err(SecretBentoError::Usage(format!(
+                "unknown doctor option `{}`\n\n{}",
+                args[2],
+                doctor_usage(&program_name)
+            )));
+        }
+        let doctor_path = args.get(2).map(PathBuf::from);
+        println!("{}", doctor_report(doctor_path.as_deref()));
         return Ok(RunOutcome {
             findings_found: false,
         });
@@ -419,7 +427,7 @@ fn scan_usage(program_name: &str) -> String {
 }
 
 fn doctor_usage(program_name: &str) -> String {
-    format!("Usage:\n  {program_name} doctor")
+    format!("Usage:\n  {program_name} doctor [path]")
 }
 
 fn help(program_name: &str) -> String {
@@ -436,7 +444,7 @@ fn scan_help(program_name: &str) -> String {
 
 fn doctor_help(program_name: &str) -> String {
     format!(
-        "Secret Bento doctor\n\nCheck local Secret Bento setup and whether gitleaks is available on PATH.\n\nUsage:\n  {program_name} doctor"
+        "Secret Bento doctor\n\nCheck local Secret Bento setup without scanning files or inspecting secrets.\n\nUsage:\n  {program_name} doctor [path]\n\nExamples:\n  {program_name} doctor\n  {program_name} doctor .\n\nNotes:\n  builtin scanner is available without Gitleaks.\n  gitleaks is recommended for stronger detection.\n  Doctor does not scan files or inspect secrets."
     )
 }
 
@@ -489,14 +497,130 @@ fn detect_gitleaks_version() -> Option<String> {
     }
 }
 
-fn doctor_report(gitleaks_version: Option<String>) -> String {
-    match gitleaks_version {
-        Some(version) => format!(
-            "Secret Bento {VERSION}\n\nOK   secret-bento is installed\nOK   gitleaks is available: {version}\n\nRecommended stronger scan:\n  secret-bento scan . --scanner gitleaks"
-        ),
-        None => format!(
-            "Secret Bento {VERSION}\n\nOK   secret-bento is installed\nWARN gitleaks was not found on PATH\n\nTry a lightweight scan:\n  secret-bento scan .\n\nRecommended stronger scan after installing Gitleaks:\n  secret-bento scan . --scanner gitleaks"
-        ),
+fn detect_git_version() -> Option<String> {
+    let output = Command::new("git").arg("--version").output().ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if stdout.is_empty() {
+        None
+    } else {
+        Some(stdout)
+    }
+}
+
+fn is_current_dir_in_git_repo() -> Option<bool> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return Some(false);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Some(stdout.trim() == "true")
+}
+
+fn doctor_report(scan_path: Option<&Path>) -> String {
+    let mut report = String::new();
+    report.push_str("Secret Bento doctor\n\n");
+    report.push_str(&format!("Secret Bento: ok v{VERSION}\n"));
+
+    match detect_gitleaks_version() {
+        Some(version) => report.push_str(&format!("Gitleaks: ok {version}\n")),
+        None => report.push_str("Gitleaks: not found\n"),
+    }
+
+    match detect_git_version() {
+        Some(version) => report.push_str(&format!("Git: ok {version}\n")),
+        None => report.push_str("Git: not found\n"),
+    }
+
+    match is_current_dir_in_git_repo() {
+        Some(true) => report.push_str("Git repository: ok\n"),
+        Some(false) => report.push_str("Git repository: not detected from current directory\n"),
+        None => report.push_str("Git repository: unknown because git was not available\n"),
+    }
+
+    if let Some(path) = scan_path {
+        report.push_str(&format!("Scan path: {}\n", doctor_path_status(path)));
+    }
+
+    let output_dir = doctor_output_directory(scan_path);
+    report.push_str(&format!(
+        "Output directory: {}\n",
+        doctor_output_directory_status(&output_dir)
+    ));
+
+    report.push_str("\nNotes:\n");
+    report.push_str("- Builtin scanner is available without Gitleaks.\n");
+    report.push_str("- Gitleaks is recommended for stronger detection.\n");
+    report.push_str("- Doctor does not scan files or inspect secrets.\n");
+
+    report
+}
+
+fn doctor_path_status(path: &Path) -> String {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_dir() => format!("ok directory {}", path.display()),
+        Ok(metadata) if metadata.is_file() => format!("ok file {}", path.display()),
+        Ok(_) => format!("ok special path {}", path.display()),
+        Err(_) => format!("missing {}", path.display()),
+    }
+}
+
+fn doctor_output_directory(scan_path: Option<&Path>) -> PathBuf {
+    match scan_path {
+        Some(path) if path.is_dir() => path.to_path_buf(),
+        Some(path) if path.exists() => path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf(),
+        Some(path) => path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf(),
+        None => PathBuf::from("."),
+    }
+}
+
+fn doctor_output_directory_status(directory: &Path) -> String {
+    if !directory.exists() {
+        return format!("not found {}", directory.display());
+    }
+
+    if !directory.is_dir() {
+        return format!("not a directory {}", directory.display());
+    }
+
+    if directory_appears_writable(directory) {
+        format!("ok writable {}", directory.display())
+    } else {
+        format!("not writable {}", directory.display())
+    }
+}
+
+fn directory_appears_writable(directory: &Path) -> bool {
+    let test_path = directory.join(format!(
+        ".secret-bento-doctor-write-test-{}",
+        std::process::id()
+    ));
+
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&test_path)
+    {
+        Ok(_) => {
+            let _ = fs::remove_file(test_path);
+            true
+        }
+        Err(_) => false,
     }
 }
 
@@ -1461,21 +1585,38 @@ mod tests {
     fn doctor_report_guides_when_gitleaks_is_missing() {
         let report = doctor_report(None);
 
-        assert!(report.contains(&format!("Secret Bento {VERSION}")));
-        assert!(report.contains("OK   secret-bento is installed"));
-        assert!(report.contains("WARN gitleaks was not found on PATH"));
-        assert!(report.contains("secret-bento scan ."));
-        assert!(report.contains("secret-bento scan . --scanner gitleaks"));
+        assert!(report.contains("Secret Bento doctor"));
+        assert!(report.contains(&format!("Secret Bento: ok v{VERSION}")));
+        assert!(report.contains("Gitleaks:"));
+        assert!(report.contains("Git:"));
+        assert!(report.contains("Git repository:"));
+        assert!(report.contains("Output directory:"));
+        assert!(report.contains("Builtin scanner is available without Gitleaks."));
+        assert!(report.contains("Gitleaks is recommended for stronger detection."));
+        assert!(report.contains("Doctor does not scan files or inspect secrets."));
     }
 
     #[test]
     fn doctor_report_recommends_gitleaks_scan_when_available() {
-        let report = doctor_report(Some("gitleaks version 8.28.0".to_string()));
+        let root = temp_scan_root("doctor-path");
+        let report = doctor_report(Some(&root));
 
-        assert!(report.contains("OK   gitleaks is available: gitleaks version 8.28.0"));
-        assert!(report.contains("Recommended stronger scan:"));
-        assert!(report.contains("secret-bento scan . --scanner gitleaks"));
-        assert!(!report.contains("WARN gitleaks"));
+        assert!(report.contains(&format!("Scan path: ok directory {}", root.display())));
+        assert!(report.contains("Output directory: ok writable"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn doctor_report_marks_missing_scan_path_without_failing() {
+        let root = temp_scan_root("doctor-missing-path");
+        let missing_path = root.join("missing");
+        let report = doctor_report(Some(&missing_path));
+
+        assert!(report.contains(&format!("Scan path: missing {}", missing_path.display())));
+        assert!(report.contains(&format!("Output directory: ok writable {}", root.display())));
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

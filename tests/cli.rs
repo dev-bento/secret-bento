@@ -90,6 +90,68 @@ fn scan_help_prints_scan_options() {
 }
 
 #[test]
+fn doctor_help_prints_optional_path_usage() {
+    let output = secret_bento(&["doctor", "--help"]);
+
+    assert!(output.status.success());
+    let stdout = stdout(&output);
+    assert!(stdout.contains("Secret Bento doctor"));
+    assert!(stdout.contains("secret-bento doctor [path]"));
+    assert!(stdout.contains("Doctor does not scan files or inspect secrets."));
+}
+
+#[test]
+fn doctor_prints_readiness_summary() {
+    let output = secret_bento(&["doctor"]);
+
+    assert!(output.status.success());
+    let stdout = stdout(&output);
+    assert!(stdout.contains("Secret Bento doctor"));
+    assert!(stdout.contains("Secret Bento: ok v"));
+    assert!(stdout.contains("Gitleaks:"));
+    assert!(stdout.contains("Git:"));
+    assert!(stdout.contains("Git repository:"));
+    assert!(stdout.contains("Output directory:"));
+    assert!(stdout.contains("Doctor does not scan files or inspect secrets."));
+}
+
+#[test]
+fn doctor_existing_path_reports_scan_path() {
+    let root = TempRoot::new("doctor-existing-path");
+    let path = root.path().to_string_lossy().to_string();
+    let output = secret_bento(&["doctor", &path]);
+
+    assert!(output.status.success());
+    let stdout = stdout(&output);
+    assert!(stdout.contains("Scan path: ok directory"));
+    assert!(stdout.contains(&path));
+    assert!(stdout.contains("Output directory: ok writable"));
+}
+
+#[test]
+fn doctor_missing_path_reports_scan_path_without_failing() {
+    let root = TempRoot::new("doctor-missing-path");
+    let path = root.path().join("missing");
+    let path = path.to_string_lossy().to_string();
+    let output = secret_bento(&["doctor", &path]);
+
+    assert!(output.status.success());
+    let stdout = stdout(&output);
+    assert!(stdout.contains("Scan path: missing"));
+    assert!(stdout.contains(&path));
+}
+
+#[test]
+fn unknown_doctor_option_exits_with_specific_usage_error() {
+    let output = secret_bento(&["doctor", "--definitely-not-real"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = stderr(&output);
+    assert!(stderr.contains("unknown doctor option `--definitely-not-real`"));
+    assert!(stderr.contains("secret-bento doctor [path]"));
+}
+
+#[test]
 fn unknown_command_exits_with_specific_usage_error() {
     let output = secret_bento(&["frobnicate"]);
 
