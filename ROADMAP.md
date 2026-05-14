@@ -28,20 +28,46 @@ Secret Bento is starting as a small, local-first CLI focused on safe AI handoff 
 
 ## v0.3 - Better Context And Prioritization
 
+- Add concise CLI help and clearer usage errors.
+- Add compact scan completion summaries.
+- Add stable finding display IDs such as `SB-001`.
+- Add report status metadata and final verification guidance.
+- Expand `secret-bento doctor` into a non-invasive local readiness check.
+
+## v0.4 - Gitleaks Safety Hardening
+
+- Read Gitleaks JSON from stdout instead of writing a raw JSON report file during normal operation.
+- Invoke Gitleaks with redaction enabled.
+- Keep raw Gitleaks `Secret` and `Match` values out of normalized findings and Markdown reports.
+- Redact token-shaped values from scanner runtime diagnostics.
+- Add sentinel regression tests for report and diagnostic redaction.
+
+## Next
+
 - Add configurable include paths.
 - Add machine-readable Secret Bento output, likely JSON, for editor and CI workflows.
 - Improve severity scoring based on file type, key type, and exposure likelihood.
 - Add deeper guidance for rotation, revocation, and git history cleanup.
 - Add safer snippets with strict redaction and minimal surrounding context.
 - Evaluate additional scanner integrations using the same adapter and normalization pattern.
-
-## Later
-
-- Add CI-friendly exit codes.
 - Add baseline support for known accepted findings.
 - Add pre-commit usage documentation.
 - Add templates for AI handoff prompts.
-- Package binaries for common platforms.
+- Add release archive smoke checks.
+- Add Linux CI coverage alongside Windows.
+- Consider splitting `src/lib.rs` into focused CLI, doctor, scanner, and output modules after behavior stabilizes.
+
+## Future Bento Products
+
+Dev Bento is intended as a small family of local-first CLIs for indie developers. Future Bento products should follow the same constraints:
+
+- local-first by default
+- no SaaS dashboard requirement
+- no telemetry by default
+- no code upload
+- Markdown or file-based handoff where useful
+- narrow command surfaces
+- clear paid Starter Kit boundaries when a workflow package exists
 
 ## Non-Goals
 

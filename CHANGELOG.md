@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Added concise CLI help for top-level, scan, and doctor commands.
+- Added compact scan completion summaries with scanner, report path, finding count, exit-code meaning, and safe next steps.
+- Added binary-level CLI integration tests for help, usage errors, and scan summaries.
+- Added report status metadata, stable `SB-001` style finding display IDs, and a final verification section to Markdown reports.
+- Expanded `secret-bento doctor` into a non-invasive readiness check for Secret Bento, Gitleaks, Git, current git repository status, optional scan path status, and output directory writeability.
+- Added `secret-bento doctor <path>` support.
+
+### Changed
+- Improved usage/configuration errors for unknown commands, unknown scan options, missing scan paths, duplicate scan paths, invalid scanner names, and invalid doctor options.
+- Hardened Gitleaks runtime diagnostics by redacting token-shaped values from stderr while continuing to avoid echoing scanner stdout on runtime failures.
+
 ## v0.4.0 - 2026-05-12
 
 ### Changed

@@ -36,6 +36,12 @@ You can also check the local setup:
 secret-bento doctor
 ```
 
+You can check a specific scan target before running a scan:
+
+```sh
+secret-bento doctor .
+```
+
 ### Try Secret Bento Without Extra Tools
 
 Scan the current repository with the default `builtin` scanner:
@@ -47,6 +53,8 @@ secret-bento scan .
 This uses the lightweight built-in scanner. It is useful for a quick local smoke check, but it is not a full secret scanner.
 
 Secret Bento writes `SECRET_BENTO_REPORT.md` at the scanned root. Review the report locally before sharing any excerpt with an AI assistant.
+
+After a scan, Secret Bento prints a compact local summary with the scanner name, report path, finding count, exit-code meaning, and safe next steps.
 
 ### Recommended: Use Gitleaks For Stronger Detection
 
@@ -84,7 +92,27 @@ Get the Starter Kit: https://hunon.gumroad.com/l/secret-bento-starter-kit
 
 Secret Bento has a small Rust CLI. It can scan a local path with the default `builtin` scanner or orchestrate the external `gitleaks` CLI, normalize findings, and write a redacted Markdown remediation report.
 
+The CLI also includes concise help output, clearer usage errors, compact scan completion summaries, and a non-invasive `doctor` readiness check.
+
 The `builtin` scanner is intentionally basic. It does not replace established secret scanners or professional security review.
+
+## Check Local Readiness With Doctor
+
+Run:
+
+```sh
+secret-bento doctor
+```
+
+Or check a specific path:
+
+```sh
+secret-bento doctor .
+```
+
+Doctor reports Secret Bento version, Gitleaks availability, Git availability, whether the current directory appears to be inside a git repository, optional scan path status, and whether the default output directory appears writable.
+
+Doctor does not scan files, read file contents, inspect secrets, upload anything, or call AI APIs. If Gitleaks is missing, Doctor still exits successfully and notes that the built-in scanner remains available as a smoke check.
 
 ## Use Gitleaks For Stronger Scanning
 
@@ -264,7 +292,14 @@ secret-bento scan . --scanner gitleaks
 Example output:
 
 ```text
-SECRET_BENTO_REPORT.md
+Secret Bento scan complete
+
+Scanner: builtin
+Report: /path/to/repo/SECRET_BENTO_REPORT.md
+Findings: 0 total
+Exit code: 0 = clean scan
+
+Note: builtin scanner is a smoke check. Use `--scanner gitleaks` for stronger detection.
 ```
 
 ## Build From Source
@@ -324,6 +359,7 @@ Secret Bento reads the Gitleaks JSON report from stdout using `--report-path -` 
 
 Normalized report fields include:
 
+- stable display ID, such as `SB-001`
 - scanner
 - rule ID
 - severity
@@ -336,7 +372,7 @@ Normalized report fields include:
 - remediation steps
 - verification commands
 
-Markdown reports do not include gitleaks raw `Secret` or `Match` values, and those fields are not used when normalizing Gitleaks findings.
+Markdown reports include a report status block and final verification guidance. They do not include gitleaks raw `Secret` or `Match` values, and those fields are not used when normalizing Gitleaks findings.
 
 ## What It Does Not Do
 
