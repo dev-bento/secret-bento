@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.6.0 - 2026-05-23
+
+### Added
+- Added `secret-bento handoff <path>` as a first-class beginner-facing command for creating AI-safe handoff reports.
+- Added `SECRET_BENTO_HANDOFF.md` as the default handoff report output file.
+- Added a Safe to Share Checklist to generated Markdown reports.
+- Added AI Agent Instructions that tell coding assistants what they may and may not do.
+- Added Human-Only Actions for rotation, revocation, provider dashboard changes, and git history decisions.
+- Added target-specific AI handoff prompt blocks for Codex/Cursor, Claude Code, and ChatGPT.
+
+### Changed
+- Reframed generated reports around AI-safe handoff instead of generic scan output.
+- Differentiated handoff reports with a dedicated title and report-purpose status line.
+- Trimmed duplicated warnings and remediation text from handoff reports.
+- Updated README Quick Start to use `secret-bento handoff .` for beginner-facing AI handoff.
+- Updated README Quick Start language to emphasize safe AI handoff for beginner vibe coders.
+- Improved per-finding report structure to separate finding details, risk, suggested AI-assisted fixes, and human verification.
+- Updated the sample report to match the handoff-first report format.
+
+### Safety Notes
+- Secret Bento still runs locally and does not upload code or reports.
+- Secret Bento still does not call AI APIs.
+- Secret Bento still does not intentionally render raw secret values.
+- Existing scan commands and exit-code behavior are unchanged.
+- `handoff` mirrors `scan` exit-code behavior: clean scans return 0 and findings return 1.
+- The built-in scanner remains a basic smoke check, not comprehensive security coverage.
+
 ## v0.5.0 - 2026-05-14
 
 ### Added

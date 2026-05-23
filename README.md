@@ -4,17 +4,43 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/dev-bento/secret-bento)](https://github.com/dev-bento/secret-bento/releases)
 
-Local secret scanning reports for AI-assisted cleanup.
+AI-safe secret cleanup handoffs for beginner vibe coders.
 
-Part of **Dev Bento**: tiny local CLIs for AI-assisted indie developers.
+Secret Bento creates AI-safe handoff reports from local secret checks, so you can ask Codex, Claude Code, Cursor, ChatGPT, or another AI tool for cleanup help without exposing raw secrets.
+
+It runs locally. It does not upload your code. It does not call AI APIs. It does not intentionally print raw secrets.
+
+Part of **Dev Bento**: small AI-handoff kits for builders who use AI tools to change, ship, and maintain apps without leaking secrets or wrecking their repo.
 
 Don’t dump your repo. Pack it into a bento.
 
 ## Quick Start
 
-Secret Bento is a local CLI that scans a repository for possible leaked secrets and writes a redacted Markdown cleanup report.
+After installing Secret Bento, verify the binary:
 
-It is for indie developers, solo builders, and small teams who use AI assistants but do not want to paste raw repository contents or credentials into chat.
+```sh
+secret-bento --version
+```
+
+Check your local setup:
+
+```sh
+secret-bento doctor .
+```
+
+Create a redacted AI handoff report:
+
+```sh
+secret-bento handoff .
+```
+
+Secret Bento writes:
+
+```text
+SECRET_BENTO_HANDOFF.md
+```
+
+Open that report locally first. Before pasting anything into an AI chat, confirm that no real API keys, passwords, tokens, database URLs, or `.env` values appear in it.
 
 Download the latest binary for your platform from [GitHub Releases](https://github.com/dev-bento/secret-bento/releases). Release assets include SHA256 checksum files.
 
@@ -24,27 +50,36 @@ Release assets are named by version and platform:
 - `secret-bento-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz`
 - `secret-bento-vX.Y.Z-aarch64-apple-darwin.tar.gz`
 
-After unpacking the archive, verify the binary:
+## What To Do If Secret Bento Finds Something
+
+1. Do not paste the raw secret into chat.
+2. Read the finding in `SECRET_BENTO_HANDOFF.md`.
+3. Paste the report's AI handoff prompt into Codex, Claude Code, Cursor, ChatGPT, or your AI tool of choice.
+4. Let the AI help with code, docs, `.gitignore`, and `.env.example`.
+5. Rotate or revoke real exposed keys yourself in the provider dashboard.
+6. Re-run `secret-bento handoff .` or `secret-bento scan .`.
+
+## Use With Codex, Claude Code, Cursor, Or ChatGPT
+
+The report includes tool-specific prompts. Use the Codex/Cursor or Claude Code prompt when the AI can edit your local repo. Use the ChatGPT prompt when you only want explanation and a checklist.
+
+The prompts tell AI tools not to ask for secret values, not to print secret values, not to run destructive git commands, and not to rewrite git history.
+
+Use `handoff` when you want a report to paste into Codex, Claude Code, Cursor, or ChatGPT:
 
 ```sh
-secret-bento --version
+secret-bento handoff .
 ```
 
-You can also check the local setup:
+Use `scan` when you want the standard scan report or CI-compatible workflow:
 
 ```sh
-secret-bento doctor
+secret-bento scan .
 ```
 
-You can check a specific scan target before running a scan:
+## Standard Scan Report For Existing Users And CI
 
-```sh
-secret-bento doctor .
-```
-
-### Try Secret Bento Without Extra Tools
-
-Scan the current repository with the default `builtin` scanner:
+Use `scan` when you want the standard report filename, CI-friendly behavior, or compatibility with existing workflows:
 
 ```sh
 secret-bento scan .
@@ -54,31 +89,37 @@ This uses the lightweight built-in scanner. It is useful for a quick local smoke
 
 Secret Bento writes `SECRET_BENTO_REPORT.md` at the scanned root. Review the report locally before sharing any excerpt with an AI assistant.
 
+For beginner-facing AI handoff, use `secret-bento handoff .`, which writes `SECRET_BENTO_HANDOFF.md`.
+
 After a scan, Secret Bento prints a compact local summary with the scanner name, report path, finding count, exit-code meaning, and safe next steps.
 
-### Recommended: Use Gitleaks For Stronger Detection
+## Recommended: Use Gitleaks For Stronger Detection
 
 Install Gitleaks separately, then run:
+
+```sh
+secret-bento handoff . --scanner gitleaks
+```
+
+In this mode, Gitleaks does the detection. Secret Bento turns the results into a redacted Markdown handoff report that you can review locally and safely give to an AI assistant.
+
+For standard reports or CI workflows, use:
 
 ```sh
 secret-bento scan . --scanner gitleaks
 ```
 
-In this mode, Gitleaks does the detection. Secret Bento turns the results into a redacted Markdown cleanup report that you can review locally and safely hand to an AI assistant.
-
 ## What Is Secret Bento?
 
-Secret Bento is a small Rust CLI that scans a local repository for accidentally leaked secrets and writes a redacted Markdown report you can review before asking an AI assistant for cleanup help.
-
-It is built for indie developers, solo builders, and small teams who want a practical local check before sharing security context with ChatGPT, Claude, Codex, Cursor, Gemini, or another assistant.
+Secret Bento is a small Rust CLI that creates AI-safe handoff reports from local secret checks. It helps indie developers, solo builders, and small teams ask ChatGPT, Claude, Codex, Cursor, Gemini, or another assistant for cleanup help without pasting raw credentials or an entire repository into chat.
 
 Secret Bento does three things:
 
-- runs locally against a repository path
-- detects possible secrets with the built-in scanner or a local Gitleaks install
-- turns findings into redacted, prioritized remediation guidance in Markdown
+- runs local secret checks against a repository path
+- normalizes possible findings from the built-in checker or a local Gitleaks install
+- writes redacted Markdown handoff reports with AI prompts, human-only actions, and verification steps
 
-It does not upload code, call AI APIs, automatically fix secrets, or replace mature scanners and professional security review. The value is the report: safe context packaging, practical prioritization, and remediation guidance that is easy to hand to an AI assistant without uploading your codebase.
+It does not upload code, call AI APIs, automatically fix secrets, or replace mature scanners and professional security review. The value is the handoff: safe context packaging, practical prioritization, and remediation guidance that is easy to give an AI assistant without leaking secrets.
 
 ## Starter Kit
 
@@ -90,9 +131,14 @@ Get the Starter Kit: https://hunon.gumroad.com/l/secret-bento-starter-kit
 
 ## Current Status
 
-Secret Bento has a small Rust CLI. It can scan a local path with the default `builtin` scanner or orchestrate the external `gitleaks` CLI, normalize findings, and write a redacted Markdown remediation report.
+Secret Bento v0.6 has two local report workflows:
 
-The CLI also includes concise help output, clearer usage errors, compact scan completion summaries, and a non-invasive `doctor` readiness check.
+- `secret-bento handoff .` writes `SECRET_BENTO_HANDOFF.md`, a concise AI-safe handoff report for Codex, Claude Code, Cursor, ChatGPT, or another assistant.
+- `secret-bento scan .` writes `SECRET_BENTO_REPORT.md`, the standard scan report for existing users, CI, and scanner-style workflows.
+
+Both workflows use the same local secret checks, scanner redaction behavior, and anti-leak guarantees. Secret Bento can use the default `builtin` checker or orchestrate the external `gitleaks` CLI, normalize findings, and write redacted Markdown.
+
+The CLI also includes concise help output, clearer usage errors, compact completion summaries, and a non-invasive `doctor` readiness check.
 
 The `builtin` scanner is intentionally basic. It does not replace established secret scanners or professional security review.
 
@@ -246,7 +292,7 @@ Secret Bento is designed to produce redacted, AI-ready remediation context. Befo
 - Share only the findings and remediation context needed for help.
 - Do not paste raw credentials, `.env` contents, or unredacted scanner output into chat.
 
-The report includes an AI handoff prompt you can use after that local review.
+The report includes AI handoff prompts you can use after that local review.
 
 ## Gitleaks Installation And PATH
 
@@ -282,14 +328,36 @@ Never paste raw secrets into AI chats. Secret Bento runs Gitleaks with redaction
 
 ## Usage Reference
 
-The scanner option supports `builtin` and `gitleaks`, with `builtin` as the default:
+Use `handoff` when you want AI-safe context to paste into an assistant:
 
 ```sh
+secret-bento handoff .
+secret-bento handoff . --scanner gitleaks
+secret-bento handoff . --output SECRET_BENTO_HANDOFF.md
+```
+
+Use `scan` when you want the standard scan report or CI-compatible workflow:
+
+```sh
+secret-bento scan .
 secret-bento scan . --scanner builtin
 secret-bento scan . --scanner gitleaks
 ```
 
 Example output:
+
+```text
+Secret Bento handoff complete
+
+Scanner: builtin
+Report: /path/to/repo/SECRET_BENTO_HANDOFF.md
+Findings: 0 total
+Exit code: 0 = clean scan
+
+Note: builtin scanner is a smoke check. Use `--scanner gitleaks` for stronger detection.
+```
+
+Standard scan output uses the scan report filename:
 
 ```text
 Secret Bento scan complete

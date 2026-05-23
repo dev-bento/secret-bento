@@ -14,9 +14,10 @@ mod report;
 
 use finding::{SecretBentoFinding, Severity};
 use redaction::{redact_line, redact_token_shaped_values};
-use report::generate_report;
+use report::{generate_handoff_report, generate_report};
 
 const REPORT_FILE: &str = "SECRET_BENTO_REPORT.md";
+const HANDOFF_REPORT_FILE: &str = "SECRET_BENTO_HANDOFF.md";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const IGNORED_DIRS: &[&str] = &[".git", "node_modules", ".next", "dist", "build", "target"];
 const GENERIC_SECRET_NAMES: &[&str] = &["API_KEY", "SECRET_KEY", "TOKEN", "DATABASE_URL"];
@@ -33,6 +34,43 @@ const PLACEHOLDER_VALUES: &[&str] = &[
     "your-token",
     "your_token",
 ];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CommandKind {
+    Scan,
+    Handoff,
+}
+
+impl CommandKind {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "scan" => Some(CommandKind::Scan),
+            "handoff" => Some(CommandKind::Handoff),
+            _ => None,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            CommandKind::Scan => "scan",
+            CommandKind::Handoff => "handoff",
+        }
+    }
+
+    fn default_report_file(self) -> &'static str {
+        match self {
+            CommandKind::Scan => REPORT_FILE,
+            CommandKind::Handoff => HANDOFF_REPORT_FILE,
+        }
+    }
+
+    fn completion_label(self) -> &'static str {
+        match self {
+            CommandKind::Scan => "Secret Bento scan complete",
+            CommandKind::Handoff => "Secret Bento handoff complete",
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ScannerKind {
@@ -54,6 +92,7 @@ impl ScannerKind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ScanOptions {
+    command: CommandKind,
     scanner: ScannerKind,
     path: PathBuf,
     excludes: Vec<String>,
@@ -235,17 +274,28 @@ pub fn run(args: Vec<String>) -> Result<RunOutcome, SecretBentoError> {
         });
     }
 
-    let options = parse_scan_options(&args, &program_name).map_err(SecretBentoError::Usage)?;
+    if args.len() >= 3 && args[1] == "handoff" && is_help_arg(&args[2]) {
+        println!("{}", handoff_help(&program_name));
+        return Ok(RunOutcome {
+            findings_found: false,
+        });
+    }
+
+    let options = parse_command_options(&args, &program_name).map_err(SecretBentoError::Usage)?;
 
     if !options.path.exists() {
         return Err(SecretBentoError::Usage(format!(
-            "scan path does not exist: {}",
+            "{} path does not exist: {}",
+            options.command.name(),
             options.path.display()
         )));
     }
 
     let root = fs::canonicalize(&options.path).map_err(|error| {
-        SecretBentoError::Runtime(format!("failed to resolve scan path: {error}"))
+        SecretBentoError::Runtime(format!(
+            "failed to resolve {} path: {error}",
+            options.command.name()
+        ))
     })?;
     let context = ScanContext {
         root,
@@ -254,8 +304,17 @@ pub fn run(args: Vec<String>) -> Result<RunOutcome, SecretBentoError> {
     let scanner = scanner_for(options.scanner);
     let result = scanner.scan(&context).map_err(SecretBentoError::Runtime)?;
 
-    let report = generate_report(&context.root, result.scanner_name, &result.findings);
-    let report_path = resolve_report_path(&context.root, options.output.as_deref());
+    let report = match options.command {
+        CommandKind::Scan => generate_report(&context.root, result.scanner_name, &result.findings),
+        CommandKind::Handoff => {
+            generate_handoff_report(&context.root, result.scanner_name, &result.findings)
+        }
+    };
+    let report_path = resolve_output_path(
+        &context.root,
+        options.output.as_deref(),
+        options.command.default_report_file(),
+    );
     if let Some(parent) = report_path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
             SecretBentoError::Runtime(format!(
@@ -271,18 +330,46 @@ pub fn run(args: Vec<String>) -> Result<RunOutcome, SecretBentoError> {
         ))
     })?;
 
-    print_scan_summary(result.scanner_name, &report_path, result.findings.len());
+    print_completion_summary(
+        options.command,
+        result.scanner_name,
+        &report_path,
+        result.findings.len(),
+    );
     Ok(RunOutcome {
         findings_found: !result.findings.is_empty(),
     })
 }
 
-fn parse_scan_options(args: &[String], program_name: &str) -> Result<ScanOptions, String> {
+fn parse_command_options(args: &[String], program_name: &str) -> Result<ScanOptions, String> {
+    let command = command_from_args(args, program_name)?;
+    parse_options_for_command(args, program_name, command)
+}
+
+fn command_from_args(args: &[String], program_name: &str) -> Result<CommandKind, String> {
     if args.len() < 2 {
         return Err(format!("missing command\n\n{}", usage(program_name)));
     }
 
-    if args[1] != "scan" {
+    CommandKind::parse(&args[1])
+        .ok_or_else(|| format!("unknown command `{}`\n\n{}", args[1], usage(program_name)))
+}
+
+#[cfg(test)]
+fn parse_scan_options(args: &[String], program_name: &str) -> Result<ScanOptions, String> {
+    parse_options_for_command(args, program_name, CommandKind::Scan)
+}
+
+fn parse_options_for_command(
+    args: &[String],
+    program_name: &str,
+    command: CommandKind,
+) -> Result<ScanOptions, String> {
+    if args.len() < 2 {
+        return Err(format!("missing command\n\n{}", usage(program_name)));
+    }
+
+    if args[1] != command.name() {
         return Err(format!(
             "unknown command `{}`\n\n{}",
             args[1],
@@ -292,8 +379,9 @@ fn parse_scan_options(args: &[String], program_name: &str) -> Result<ScanOptions
 
     if args.len() < 3 {
         return Err(format!(
-            "scan requires a path\n\n{}",
-            scan_usage(program_name)
+            "{} requires a path\n\n{}",
+            command.name(),
+            command_usage(program_name, command)
         ));
     }
 
@@ -310,7 +398,7 @@ fn parse_scan_options(args: &[String], program_name: &str) -> Result<ScanOptions
                 let value = args.get(index).ok_or_else(|| {
                     format!(
                         "missing value for `--exclude`\n\n{}",
-                        scan_usage(program_name)
+                        command_usage(program_name, command)
                     )
                 })?;
                 excludes.push(value.to_string());
@@ -320,7 +408,7 @@ fn parse_scan_options(args: &[String], program_name: &str) -> Result<ScanOptions
                 if value.is_empty() {
                     return Err(format!(
                         "missing value for `--exclude`\n\n{}",
-                        scan_usage(program_name)
+                        command_usage(program_name, command)
                     ));
                 }
                 excludes.push(value.to_string());
@@ -330,7 +418,7 @@ fn parse_scan_options(args: &[String], program_name: &str) -> Result<ScanOptions
                 let value = args.get(index).ok_or_else(|| {
                     format!(
                         "missing value for `--output`\n\n{}",
-                        scan_usage(program_name)
+                        command_usage(program_name, command)
                     )
                 })?;
                 output = Some(PathBuf::from(value));
@@ -340,7 +428,7 @@ fn parse_scan_options(args: &[String], program_name: &str) -> Result<ScanOptions
                 if value.is_empty() {
                     return Err(format!(
                         "missing value for `--output`\n\n{}",
-                        scan_usage(program_name)
+                        command_usage(program_name, command)
                     ));
                 }
                 output = Some(PathBuf::from(value));
@@ -350,28 +438,32 @@ fn parse_scan_options(args: &[String], program_name: &str) -> Result<ScanOptions
                 let value = args.get(index).ok_or_else(|| {
                     format!(
                         "missing value for `--scanner`\n\n{}",
-                        scan_usage(program_name)
+                        command_usage(program_name, command)
                     )
                 })?;
-                scanner = ScannerKind::parse(value)
-                    .map_err(|error| format!("{error}\n\n{}", scan_usage(program_name)))?;
+                scanner = ScannerKind::parse(value).map_err(|error| {
+                    format!("{error}\n\n{}", command_usage(program_name, command))
+                })?;
             }
             value if value.starts_with("--scanner=") => {
                 let value = value.trim_start_matches("--scanner=");
-                scanner = ScannerKind::parse(value)
-                    .map_err(|error| format!("{error}\n\n{}", scan_usage(program_name)))?;
+                scanner = ScannerKind::parse(value).map_err(|error| {
+                    format!("{error}\n\n{}", command_usage(program_name, command))
+                })?;
             }
             value if value.starts_with("--") => {
                 return Err(format!(
                     "unknown option `{value}`\n\n{}",
-                    scan_usage(program_name)
+                    command_usage(program_name, command)
                 ));
             }
             value => {
                 if path.is_some() {
                     return Err(format!(
-                        "duplicate scan path `{value}`; scan accepts exactly one path\n\n{}",
-                        scan_usage(program_name)
+                        "duplicate {} path `{value}`; {} accepts exactly one path\n\n{}",
+                        command.name(),
+                        command.name(),
+                        command_usage(program_name, command)
                     ));
                 }
                 path = Some(PathBuf::from(value));
@@ -381,10 +473,16 @@ fn parse_scan_options(args: &[String], program_name: &str) -> Result<ScanOptions
         index += 1;
     }
 
-    let path =
-        path.ok_or_else(|| format!("scan requires a path\n\n{}", scan_usage(program_name)))?;
+    let path = path.ok_or_else(|| {
+        format!(
+            "{} requires a path\n\n{}",
+            command.name(),
+            command_usage(program_name, command)
+        )
+    })?;
 
     Ok(ScanOptions {
+        command,
         scanner,
         path,
         excludes,
@@ -416,13 +514,15 @@ fn scanner_for(scanner: ScannerKind) -> Box<dyn Scanner> {
 
 fn usage(program_name: &str) -> String {
     format!(
-        "Usage:\n  {program_name} help\n  {program_name} --version\n  {program_name} doctor\n  {program_name} scan <path> [--scanner builtin|gitleaks] [--exclude <glob>]... [--output <path>]"
+        "Usage:\n  {program_name} help\n  {program_name} --version\n  {program_name} doctor\n  {program_name} handoff <path> [--scanner builtin|gitleaks] [--exclude <glob>]... [--output <path>]\n  {program_name} scan <path> [--scanner builtin|gitleaks] [--exclude <glob>]... [--output <path>]"
     )
 }
 
-fn scan_usage(program_name: &str) -> String {
+fn command_usage(program_name: &str, command: CommandKind) -> String {
     format!(
-        "Usage:\n  {program_name} scan <path> [--scanner builtin|gitleaks] [--exclude <glob>]... [--output <path>]\n\nRun `{program_name} scan --help` for examples."
+        "Usage:\n  {program_name} {} <path> [--scanner builtin|gitleaks] [--exclude <glob>]... [--output <path>]\n\nRun `{program_name} {} --help` for examples.",
+        command.name(),
+        command.name()
     )
 }
 
@@ -432,7 +532,7 @@ fn doctor_usage(program_name: &str) -> String {
 
 fn help(program_name: &str) -> String {
     format!(
-        "Secret Bento\n\nLocal secret scanning reports for AI-assisted cleanup.\n\nCommands:\n  help              Show this help.\n  doctor            Check local setup.\n  scan <path>       Scan a local path and write a redacted Markdown report.\n  --version         Print the Secret Bento version.\n\nExamples:\n  {program_name} doctor\n  {program_name} scan .\n  {program_name} scan . --scanner gitleaks --output reports/secret-bento.md\n\nNotes:\n  builtin scanner is a no-dependency smoke check.\n  gitleaks is recommended for stronger detection.\n  Reports are redacted summaries, not raw scanner output.\n\nRun `{program_name} scan --help` for scan options."
+        "Secret Bento\n\nAI-safe secret cleanup handoff reports for beginner vibe coders.\n\nCommands:\n  help              Show this help.\n  doctor            Check local setup.\n  handoff <path>    Create an AI-safe Markdown handoff report.\n  scan <path>       Scan a local path and write a redacted Markdown report.\n  --version         Print the Secret Bento version.\n\nExamples:\n  {program_name} doctor\n  {program_name} handoff .\n  {program_name} scan .\n  {program_name} scan . --scanner gitleaks --output reports/secret-bento.md\n\nNotes:\n  handoff writes SECRET_BENTO_HANDOFF.md by default.\n  scan writes SECRET_BENTO_REPORT.md by default.\n  builtin scanner is a no-dependency smoke check.\n  gitleaks is recommended for stronger detection.\n  Reports are redacted summaries, not raw scanner output.\n\nRun `{program_name} handoff --help` or `{program_name} scan --help` for options."
     )
 }
 
@@ -442,13 +542,24 @@ fn scan_help(program_name: &str) -> String {
     )
 }
 
+fn handoff_help(program_name: &str) -> String {
+    format!(
+        "Secret Bento handoff\n\nCreate an AI-safe Markdown handoff report for Codex, Claude Code, Cursor, ChatGPT, or another AI assistant.\n\nUsage:\n  {program_name} handoff <path> [options]\n\nOptions:\n  --scanner builtin|gitleaks   Select scanner. Default: builtin.\n  --output <path>              Write handoff report to a custom Markdown path.\n  --exclude <glob>             Exclude a path pattern from the builtin scanner. Repeatable.\n  -h, --help                   Show this help.\n\nExamples:\n  {program_name} handoff .\n  {program_name} handoff . --scanner gitleaks\n  {program_name} handoff . --exclude docs/** --output reports/secret-bento-handoff.md\n\nNotes:\n  handoff writes SECRET_BENTO_HANDOFF.md by default.\n  builtin scanner is a no-dependency smoke check.\n  gitleaks is recommended for stronger detection.\n  Reports are redacted summaries, not raw scanner output."
+    )
+}
+
 fn doctor_help(program_name: &str) -> String {
     format!(
         "Secret Bento doctor\n\nCheck local Secret Bento setup without scanning files or inspecting secrets.\n\nUsage:\n  {program_name} doctor [path]\n\nExamples:\n  {program_name} doctor\n  {program_name} doctor .\n\nNotes:\n  builtin scanner is available without Gitleaks.\n  gitleaks is recommended for stronger detection.\n  Doctor does not scan files or inspect secrets."
     )
 }
 
-fn print_scan_summary(scanner_name: &str, report_path: &Path, finding_count: usize) {
+fn print_completion_summary(
+    command: CommandKind,
+    scanner_name: &str,
+    report_path: &Path,
+    finding_count: usize,
+) {
     let exit_code = if finding_count == 0 {
         ExitCode::Clean
     } else {
@@ -460,7 +571,7 @@ fn print_scan_summary(scanner_name: &str, report_path: &Path, finding_count: usi
         "findings detected"
     };
 
-    println!("Secret Bento scan complete");
+    println!("{}", command.completion_label());
     println!();
     println!("Scanner: {scanner_name}");
     println!("Report: {}", report_path.display());
@@ -474,7 +585,7 @@ fn print_scan_summary(scanner_name: &str, report_path: &Path, finding_count: usi
     println!("Next:");
     println!("- Review the redacted report locally.");
     println!("- Do not paste raw secrets into AI chat.");
-    println!("- Re-run the scan after cleanup.");
+    println!("- Re-run Secret Bento after cleanup.");
 }
 
 fn detect_gitleaks_version() -> Option<String> {
@@ -752,11 +863,21 @@ fn glob_segment_matches(pattern: &str, text: &str) -> bool {
     }
 }
 
+#[cfg(test)]
 fn resolve_report_path(root: &Path, output: Option<&Path>) -> PathBuf {
+    resolve_output_path(root, output, REPORT_FILE)
+}
+
+#[cfg(test)]
+fn resolve_handoff_report_path(root: &Path, output: Option<&Path>) -> PathBuf {
+    resolve_output_path(root, output, HANDOFF_REPORT_FILE)
+}
+
+fn resolve_output_path(root: &Path, output: Option<&Path>, default_file: &str) -> PathBuf {
     match output {
         Some(path) if path.is_absolute() => path.to_path_buf(),
         Some(path) => root.join(path),
-        None => root.join(REPORT_FILE),
+        None => root.join(default_file),
     }
 }
 
@@ -764,6 +885,7 @@ fn should_scan_file(root: &Path, path: &Path) -> bool {
     if matches!(
         path.strip_prefix(root),
         Ok(relative_path) if relative_path == Path::new(REPORT_FILE)
+            || relative_path == Path::new(HANDOFF_REPORT_FILE)
     ) {
         return false;
     }
@@ -1361,8 +1483,14 @@ mod tests {
         assert!(report.contains("## Summary"));
         assert!(report.contains("## Findings"));
         assert!(report.contains("## Safety Note"));
+        assert!(report.contains("## Safe to Share Checklist"));
+        assert!(report.contains("## AI Agent Instructions"));
+        assert!(report.contains("## Human-Only Actions"));
         assert!(report.contains("## Suggested Remediation"));
-        assert!(report.contains("## AI Handoff Prompt"));
+        assert!(report.contains("## AI Handoff Prompts"));
+        assert!(report.contains("### Codex / Cursor"));
+        assert!(report.contains("### Claude Code"));
+        assert!(report.contains("### ChatGPT"));
         assert!(report.contains("## Final Verification"));
         assert!(report.contains("- Scanner: `builtin`"));
         assert!(report.contains("- Report type: redacted summary"));
@@ -1375,7 +1503,32 @@ mod tests {
         assert!(report.contains(
             "- Re-run Secret Bento with the same scanner: `secret-bento scan <path> --scanner builtin`"
         ));
-        assert!(report.contains("- Do not paste raw secrets into AI chat."));
+        assert!(report.contains("# Secret Bento Report"));
+        assert!(!report.contains("# Secret Bento Handoff Report"));
+        assert!(report.contains("Do not ask for or print secret values."));
+        assert!(report.contains("rewrite git history"));
+        assert!(report.contains("## Suggested Remediation"));
+    }
+
+    #[test]
+    fn handoff_report_includes_handoff_title_status_and_trimmed_sections() {
+        let report = generate_handoff_report(Path::new("/repo"), "builtin", &[]);
+
+        assert!(report.contains("# Secret Bento Handoff Report"));
+        assert!(report.contains("- Report purpose: AI-safe handoff"));
+        assert!(report.contains("## Safe to Share Checklist"));
+        assert!(report.contains("## AI Handoff Prompts"));
+        assert!(report.contains("## AI Agent Instructions"));
+        assert!(report.contains("## Human-Only Actions"));
+        assert!(report.contains("## Findings"));
+        assert!(report.contains("## Final Verification"));
+        assert!(
+            report.find("## AI Handoff Prompts").unwrap() < report.find("## Findings").unwrap()
+        );
+        assert!(!report.contains("## Suggested Remediation"));
+        assert!(report.contains("- Re-run Secret Bento with the same scanner."));
+        assert!(report.contains("- Review `git diff` before committing cleanup changes."));
+        assert!(report.contains("- Review `git status --short`."));
     }
 
     #[test]
@@ -1397,6 +1550,10 @@ mod tests {
         let report = generate_report(Path::new("/repo"), "builtin", &[finding]);
 
         assert!(report.contains("### SB-001. Possible OpenAI API Key"));
+        assert!(report.contains("#### Finding"));
+        assert!(report.contains("#### Risk"));
+        assert!(report.contains("#### Suggested AI-Assisted Fix"));
+        assert!(report.contains("#### Human Verification"));
         assert!(report.contains("- ID: `SB-001`"));
         assert!(report.contains("- Description: OPENAI_API_KEY=<REDACTED>"));
         assert!(!report.contains("- Evidence:"));
@@ -1416,7 +1573,26 @@ mod tests {
         assert!(
             report.contains("- Redaction status: raw secret values are not intentionally rendered")
         );
+        assert!(report.contains("## Safe to Share Checklist"));
+        assert!(report.contains("## AI Agent Instructions"));
+        assert!(report.contains("## Human-Only Actions"));
+        assert!(report.contains("## AI Handoff Prompts"));
         assert!(report.contains("- Description: OPENAI_API_KEY=<REDACTED>"));
+        assert_report_omits_raw_secret(&report, raw_secret);
+    }
+
+    #[test]
+    fn handoff_report_redacts_sentinel_raw_secret() {
+        let raw_secret = "sk-SENTINEL_HANDOFF_REPORT_VALUE_DO_NOT_RENDER_123456";
+        let root = Path::new("/repo");
+        let path = Path::new("/repo/src/config.ts");
+        let findings = detect_line(root, path, 3, &format!("OPENAI_API_KEY=\"{raw_secret}\""));
+        let report = generate_handoff_report(root, "builtin", &findings);
+
+        assert!(report.contains("# Secret Bento Handoff Report"));
+        assert!(report.contains("- Report purpose: AI-safe handoff"));
+        assert!(report.contains("- Description: OPENAI_API_KEY=<REDACTED>"));
+        assert!(!report.contains("Rotate or revoke any real credential in the provider dashboard if it was committed, shared, or exposed."));
         assert_report_omits_raw_secret(&report, raw_secret);
     }
 
@@ -1528,6 +1704,14 @@ mod tests {
     }
 
     #[test]
+    fn default_handoff_output_stays_at_scanned_root() {
+        let root = Path::new("repo");
+        let report_path = resolve_handoff_report_path(root, None);
+
+        assert_eq!(report_path, PathBuf::from("repo").join(HANDOFF_REPORT_FILE));
+    }
+
+    #[test]
     fn run_writes_custom_output_path_and_creates_parents() {
         let root = temp_scan_root("custom-output");
         write_test_file(
@@ -1569,6 +1753,23 @@ mod tests {
         .unwrap();
 
         assert!(root.join(REPORT_FILE).exists());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn run_writes_default_handoff_output_at_scanned_root() {
+        let root = temp_scan_root("default-handoff-output");
+
+        run(vec![
+            "secret-bento".to_string(),
+            "handoff".to_string(),
+            root.display().to_string(),
+        ])
+        .unwrap();
+
+        assert!(root.join(HANDOFF_REPORT_FILE).exists());
+        assert!(!root.join(REPORT_FILE).exists());
 
         fs::remove_dir_all(root).unwrap();
     }
@@ -1646,6 +1847,23 @@ mod tests {
         ];
         let options = parse_scan_options(&args, "secret-bento").unwrap();
 
+        assert_eq!(options.command, CommandKind::Scan);
+        assert_eq!(options.scanner, ScannerKind::Builtin);
+        assert_eq!(options.path, PathBuf::from("."));
+        assert!(options.excludes.is_empty());
+        assert_eq!(options.output, None);
+    }
+
+    #[test]
+    fn parses_default_handoff_builtin_scanner() {
+        let args = vec![
+            "secret-bento".to_string(),
+            "handoff".to_string(),
+            ".".to_string(),
+        ];
+        let options = parse_command_options(&args, "secret-bento").unwrap();
+
+        assert_eq!(options.command, CommandKind::Handoff);
         assert_eq!(options.scanner, ScannerKind::Builtin);
         assert_eq!(options.path, PathBuf::from("."));
         assert!(options.excludes.is_empty());
@@ -1663,6 +1881,7 @@ mod tests {
         ];
         let options = parse_scan_options(&args, "secret-bento").unwrap();
 
+        assert_eq!(options.command, CommandKind::Scan);
         assert_eq!(options.scanner, ScannerKind::Builtin);
     }
 
@@ -1676,6 +1895,7 @@ mod tests {
         ];
         let options = parse_scan_options(&args, "secret-bento").unwrap();
 
+        assert_eq!(options.command, CommandKind::Scan);
         assert_eq!(options.scanner, ScannerKind::Gitleaks);
     }
 
@@ -1693,11 +1913,33 @@ mod tests {
         ];
         let options = parse_scan_options(&args, "secret-bento").unwrap();
 
+        assert_eq!(options.command, CommandKind::Scan);
         assert_eq!(options.excludes, vec!["docs/**", "tests/**"]);
         assert_eq!(
             options.output,
             Some(PathBuf::from("reports/secret-report.md"))
         );
+    }
+
+    #[test]
+    fn parses_handoff_exclude_scanner_and_output_options() {
+        let args = vec![
+            "secret-bento".to_string(),
+            "handoff".to_string(),
+            ".".to_string(),
+            "--scanner".to_string(),
+            "builtin".to_string(),
+            "--exclude".to_string(),
+            "docs/**".to_string(),
+            "--output".to_string(),
+            "reports/handoff.md".to_string(),
+        ];
+        let options = parse_command_options(&args, "secret-bento").unwrap();
+
+        assert_eq!(options.command, CommandKind::Handoff);
+        assert_eq!(options.scanner, ScannerKind::Builtin);
+        assert_eq!(options.excludes, vec!["docs/**"]);
+        assert_eq!(options.output, Some(PathBuf::from("reports/handoff.md")));
     }
 
     #[test]
@@ -1824,9 +2066,14 @@ mod tests {
         assert!(report.contains("- Rule ID: `aws-access-token`"));
         assert!(report.contains("- Secret type: Aws Access Token"));
         assert!(report.contains("- Fingerprint: `src/config.ts:aws-access-token:7`"));
-        assert!(report.contains("- Risk: Gitleaks detected"));
-        assert!(report.contains("- Remediation steps:"));
-        assert!(report.contains("- Verification commands:"));
+        assert!(report.contains("#### Risk"));
+        assert!(report.contains("Gitleaks detected"));
+        assert!(report.contains("#### Suggested AI-Assisted Fix"));
+        assert!(report.contains("#### Human Verification"));
+        assert!(report.contains("## AI Handoff Prompts"));
+        assert!(report.contains("### Codex / Cursor"));
+        assert!(report.contains("### Claude Code"));
+        assert!(report.contains("### ChatGPT"));
         assert!(!report.contains("FAKE_AWS_ACCESS_KEY_FOR_SECRET_BENTO_TEST"));
         assert!(!report.contains("FAKE_GENERIC_API_KEY_FOR_SECRET_BENTO_TEST"));
     }

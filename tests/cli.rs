@@ -73,7 +73,7 @@ fn help_command_prints_concise_help() {
 
     assert!(output.status.success());
     let stdout = stdout(&output);
-    assert!(stdout.contains("Local secret scanning reports"));
+    assert!(stdout.contains("AI-safe secret cleanup handoff reports"));
     assert!(stdout.contains("gitleaks is recommended for stronger detection."));
 }
 
@@ -87,6 +87,20 @@ fn scan_help_prints_scan_options() {
     assert!(stdout.contains("--scanner builtin|gitleaks"));
     assert!(stdout.contains("--output <path>"));
     assert!(stdout.contains("--exclude <glob>"));
+}
+
+#[test]
+fn handoff_help_prints_handoff_options() {
+    let output = secret_bento(&["handoff", "--help"]);
+
+    assert!(output.status.success());
+    let stdout = stdout(&output);
+    assert!(stdout.contains("Secret Bento handoff"));
+    assert!(stdout.contains("secret-bento handoff <path>"));
+    assert!(stdout.contains("--scanner builtin|gitleaks"));
+    assert!(stdout.contains("--output <path>"));
+    assert!(stdout.contains("--exclude <glob>"));
+    assert!(stdout.contains("SECRET_BENTO_HANDOFF.md"));
 }
 
 #[test]
@@ -172,6 +186,16 @@ fn scan_without_path_exits_with_specific_usage_error() {
 }
 
 #[test]
+fn handoff_without_path_exits_with_specific_usage_error() {
+    let output = secret_bento(&["handoff"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = stderr(&output);
+    assert!(stderr.contains("handoff requires a path"));
+    assert!(stderr.contains("secret-bento handoff <path>"));
+}
+
+#[test]
 fn unknown_scan_option_exits_with_specific_usage_error() {
     let root = TempRoot::new("unknown-option");
     let path = root.path().to_string_lossy().to_string();
@@ -184,6 +208,18 @@ fn unknown_scan_option_exits_with_specific_usage_error() {
 }
 
 #[test]
+fn unknown_handoff_option_exits_with_specific_usage_error() {
+    let root = TempRoot::new("unknown-handoff-option");
+    let path = root.path().to_string_lossy().to_string();
+    let output = secret_bento(&["handoff", &path, "--definitely-not-real"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = stderr(&output);
+    assert!(stderr.contains("unknown option `--definitely-not-real`"));
+    assert!(stderr.contains("Run `secret-bento handoff --help` for examples."));
+}
+
+#[test]
 fn invalid_scanner_exits_with_specific_usage_error() {
     let root = TempRoot::new("invalid-scanner");
     let path = root.path().to_string_lossy().to_string();
@@ -193,6 +229,19 @@ fn invalid_scanner_exits_with_specific_usage_error() {
     let stderr = stderr(&output);
     assert!(stderr.contains("unknown scanner `not-a-scanner`"));
     assert!(stderr.contains("supported scanners: builtin, gitleaks"));
+}
+
+#[test]
+fn invalid_handoff_scanner_exits_with_specific_usage_error() {
+    let root = TempRoot::new("invalid-handoff-scanner");
+    let path = root.path().to_string_lossy().to_string();
+    let output = secret_bento(&["handoff", &path, "--scanner", "not-a-scanner"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = stderr(&output);
+    assert!(stderr.contains("unknown scanner `not-a-scanner`"));
+    assert!(stderr.contains("supported scanners: builtin, gitleaks"));
+    assert!(stderr.contains("secret-bento handoff <path>"));
 }
 
 #[test]
@@ -238,4 +287,76 @@ fn finding_builtin_scan_prints_completion_summary() {
     assert!(stdout.contains("Exit code: 1 = findings detected"));
     assert!(stdout.contains("Do not paste raw secrets into AI chat."));
     assert!(stdout.contains("builtin scanner is a smoke check"));
+}
+
+#[test]
+fn clean_builtin_handoff_writes_default_handoff_report() {
+    let root = TempRoot::new("clean-handoff");
+    let path = root.path().to_string_lossy().to_string();
+    let output = secret_bento(&["handoff", &path, "--scanner", "builtin"]);
+
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = stdout(&output);
+    assert!(stdout.contains("Secret Bento handoff complete"));
+    assert!(stdout.contains("Scanner: builtin"));
+    assert!(stdout.contains("Findings: 0 total"));
+    assert!(stdout.contains("Exit code: 0 = clean scan"));
+    assert!(stdout.contains("SECRET_BENTO_HANDOFF.md"));
+    assert!(root.path().join("SECRET_BENTO_HANDOFF.md").exists());
+    assert!(!root.path().join("SECRET_BENTO_REPORT.md").exists());
+}
+
+#[test]
+fn finding_builtin_handoff_exits_with_findings_code_and_redacts_report() {
+    let root = TempRoot::new("finding-handoff");
+    let raw_secret = "sk-SENTINEL_HANDOFF_RAW_SECRET_DO_NOT_RENDER_123456";
+    root.write("config.txt", &format!("OPENAI_API_KEY={raw_secret}"));
+    let path = root.path().to_string_lossy().to_string();
+    let output = secret_bento(&["handoff", &path]);
+
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = stdout(&output);
+    assert!(stdout.contains("Secret Bento handoff complete"));
+    assert!(stdout.contains("Findings: 1 total"));
+    assert!(stdout.contains("Exit code: 1 = findings detected"));
+
+    let report = fs::read_to_string(root.path().join("SECRET_BENTO_HANDOFF.md")).unwrap();
+    assert!(report.contains("# Secret Bento Handoff Report"));
+    assert!(report.contains("- Report purpose: AI-safe handoff"));
+    assert!(report.contains("## Safe to Share Checklist"));
+    assert!(report.contains("## AI Agent Instructions"));
+    assert!(report.contains("## Human-Only Actions"));
+    assert!(report.contains("## AI Handoff Prompts"));
+    assert!(!report.contains("## Suggested Remediation"));
+    assert!(report.contains("- Description: OPENAI_API_KEY=<REDACTED>"));
+    assert!(!report.contains(raw_secret));
+}
+
+#[test]
+fn handoff_output_path_can_be_customized() {
+    let root = TempRoot::new("handoff-custom-output");
+    let path = root.path().to_string_lossy().to_string();
+    let output = secret_bento(&[
+        "handoff",
+        &path,
+        "--output",
+        "reports/secret-bento-handoff.md",
+    ]);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(root.path().join("reports/secret-bento-handoff.md").exists());
+    assert!(!root.path().join("SECRET_BENTO_HANDOFF.md").exists());
+}
+
+#[test]
+fn handoff_exclude_skips_matching_paths() {
+    let root = TempRoot::new("handoff-exclude");
+    root.write("docs/guide.md", "OPENAI_API_KEY=sk-docs-secret-value");
+    let path = root.path().to_string_lossy().to_string();
+    let output = secret_bento(&["handoff", &path, "--exclude", "docs/**"]);
+
+    assert_eq!(output.status.code(), Some(0));
+    let report = fs::read_to_string(root.path().join("SECRET_BENTO_HANDOFF.md")).unwrap();
+    assert!(report.contains("No findings were detected by the selected scanner."));
+    assert!(!report.contains("sk-docs-secret-value"));
 }
