@@ -2,9 +2,12 @@
 name = "secret-bento"
 version = "0.6.0"
 edition = "2021"
-description = "AI-safe secret cleanup handoff reports for beginner vibe coders."
+description = "AI-safe handoff layer between secret scanners and AI coding agents."
 license = "MIT"
 repository = "https://github.com/dev-bento/secret-bento"
+documentation = "https://github.com/dev-bento/secret-bento"
+keywords = ["secrets", "security", "cli", "ai", "gitleaks"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

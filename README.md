@@ -4,23 +4,30 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/dev-bento/secret-bento)](https://github.com/dev-bento/secret-bento/releases)
 
-AI-safe secret cleanup handoffs for beginner vibe coders.
+AI-safe handoff layer between secret scanners and AI coding agents.
 
-Secret Bento creates AI-safe handoff reports from local secret checks, so you can ask Codex, Claude Code, Cursor, ChatGPT, or another AI tool for cleanup help without exposing raw secrets.
+Secret Bento turns local secret-scan results into redacted cleanup reports
+you can safely give to Codex, Claude Code, Cursor, ChatGPT, or another AI assistant.
 
-It runs locally. It does not upload your code. It does not call AI APIs. It does not intentionally print raw secrets.
+Runs locally. Does not upload your code. Does not call AI APIs.
+Does not intentionally print raw secret values.
 
 Part of **Dev Bento**: small AI-handoff kits for builders who use AI tools to change, ship, and maintain apps without leaking secrets or wrecking their repo.
 
-Don’t dump your repo. Pack it into a bento.
-
 ## Quick Start
 
-After installing Secret Bento, verify the binary:
-
 ```sh
-secret-bento --version
+cargo install secret-bento
+secret-bento handoff . --scanner gitleaks
 ```
+
+Secret Bento writes `SECRET_BENTO_HANDOFF.md` - a redacted report with
+findings, AI-safe cleanup instructions, human-only actions, and verification steps.
+
+Use Gitleaks for detection. Use Secret Bento to package the findings
+into safe remediation context.
+
+> Don't paste raw secrets into AI chats. Pack the cleanup context instead.
 
 Check your local setup:
 
@@ -28,20 +35,15 @@ Check your local setup:
 secret-bento doctor .
 ```
 
-Create a redacted AI handoff report:
+Verify the binary:
 
 ```sh
-secret-bento handoff .
-```
-
-Secret Bento writes:
-
-```text
-SECRET_BENTO_HANDOFF.md
+secret-bento --version
 ```
 
 Open that report locally first. Before pasting anything into an AI chat, confirm that no real API keys, passwords, tokens, database URLs, or `.env` values appear in it.
 
+You can also download the binary manually.
 Download the latest binary for your platform from [GitHub Releases](https://github.com/dev-bento/secret-bento/releases). Release assets include SHA256 checksum files.
 
 Release assets are named by version and platform:
