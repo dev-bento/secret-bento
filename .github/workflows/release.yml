@@ -9,8 +9,71 @@ permissions:
   contents: write
 
 jobs:
+  publish-crate:
+    name: Publish crate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify tag matches Cargo package version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $tagVersion = "${{ github.ref_name }}".TrimStart("v")
+          $versionLine = Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"' | Select-Object -First 1
+          $packageVersion = $versionLine.Matches[0].Groups[1].Value
+
+          if ($packageVersion -ne $tagVersion) {
+            throw "Tag version $tagVersion does not match Cargo package version $packageVersion."
+          }
+
+      - name: Install Rust
+        run: rustup default stable
+
+      - name: Check if crate version is already published
+        id: crate-version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $nameLine = Select-String -Path Cargo.toml -Pattern '^name = "([^"]+)"' | Select-Object -First 1
+          $versionLine = Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"' | Select-Object -First 1
+          $crateName = $nameLine.Matches[0].Groups[1].Value
+          $packageVersion = $versionLine.Matches[0].Groups[1].Value
+          $url = "https://crates.io/api/v1/crates/$crateName/$packageVersion"
+
+          try {
+            $response = Invoke-WebRequest -Uri $url -UseBasicParsing -Method Get -ErrorAction Stop
+            if ($response.StatusCode -eq 200) {
+              "already_published=true" >> $env:GITHUB_OUTPUT
+              Write-Host "$crateName $packageVersion is already published on crates.io."
+              return
+            }
+          } catch {
+            $statusCode = $_.Exception.Response.StatusCode.value__
+            if ($statusCode -ne 404) {
+              throw
+            }
+          }
+
+          "already_published=false" >> $env:GITHUB_OUTPUT
+
+      - name: Check publish package
+        if: steps.crate-version.outputs.already_published == 'false'
+        run: cargo publish --dry-run --locked
+
+      - name: Publish to crates.io
+        if: steps.crate-version.outputs.already_published == 'false'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --locked
+
   build:
     name: Build ${{ matrix.target }}
+    needs: publish-crate
     runs-on: ${{ matrix.os }}
 
     strategy:

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.6.1 - 2026-06-17
+
+### Changed
+- Updated the paid Starter Kit link from Gumroad to Polar.
+- Added release automation that publishes the crate to crates.io before building GitHub Release assets for `v*` tags.
+
 ## v0.6.0 - 2026-05-23
 
 ### Added

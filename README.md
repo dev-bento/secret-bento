@@ -129,7 +129,7 @@ Secret Bento CLI is open source.
 
 If you want the full workflow package, the paid Secret Bento Starter Kit is a separate package that includes setup guides, AI handoff prompts, checklists, GitHub Actions templates, and sanitized examples.
 
-Get the Starter Kit: https://hunon.gumroad.com/l/secret-bento-starter-kit
+Get the Starter Kit: https://buy.polar.sh/polar_cl_oVV4riytuaTZXJpKUsEhY09HjLTxrHHvgKKO11r0xCf
 
 ## Current Status
 
@@ -385,6 +385,14 @@ For a local release build:
 ```sh
 cargo build --release
 ```
+
+## Release Automation
+
+Release tags are expected to match the Cargo package version, such as `v0.6.1` for `version = "0.6.1"`.
+
+When a `v*` tag is pushed, GitHub Actions publishes the crate to crates.io first, then builds and uploads the GitHub Release assets. This keeps the crates.io README, the release archives, and the GitHub release in sync from the same commit.
+
+The workflow needs a crates.io API token stored in the repository secret `CARGO_REGISTRY_TOKEN`.
 
 ## Who It Is For
 
