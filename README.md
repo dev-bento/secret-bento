@@ -129,7 +129,7 @@ Secret Bento CLI is open source.
 
 If you want the full workflow package, the paid Secret Bento Starter Kit is a separate package that includes setup guides, AI handoff prompts, checklists, GitHub Actions templates, and sanitized examples.
 
-Get the Starter Kit: https://buy.polar.sh/polar_cl_oVV4riytuaTZXJpKUsEhY09HjLTxrHHvgKKO11r0xCf
+Get the Starter Kit: https://buy.polar.sh/polar_cl_iDI7NNm9LTdUk3Iz0J5lsARNyUsuWSFjhnQuR32Syjp
 
 ## Current Status
 
