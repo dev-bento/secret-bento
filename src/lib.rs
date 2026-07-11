@@ -12,7 +12,7 @@ mod finding;
 mod redaction;
 mod report;
 
-use finding::{SecretBentoFinding, Severity};
+use finding::{FindingClassification, SecretBentoFinding, Severity};
 use redaction::{redact_line, redact_token_shaped_values};
 use report::{generate_handoff_report, generate_report};
 
@@ -335,9 +335,17 @@ pub fn run(args: Vec<String>) -> Result<RunOutcome, SecretBentoError> {
         result.scanner_name,
         &report_path,
         result.findings.len(),
+        result
+            .findings
+            .iter()
+            .filter(|finding| finding.classification.needs_human_review())
+            .count(),
     );
     Ok(RunOutcome {
-        findings_found: !result.findings.is_empty(),
+        findings_found: result
+            .findings
+            .iter()
+            .any(|finding| finding.classification.needs_human_review()),
     })
 }
 
@@ -559,13 +567,14 @@ fn print_completion_summary(
     scanner_name: &str,
     report_path: &Path,
     finding_count: usize,
+    human_review_count: usize,
 ) {
-    let exit_code = if finding_count == 0 {
+    let exit_code = if human_review_count == 0 {
         ExitCode::Clean
     } else {
         ExitCode::Findings
     };
-    let exit_meaning = if finding_count == 0 {
+    let exit_meaning = if human_review_count == 0 {
         "clean scan"
     } else {
         "findings detected"
@@ -576,6 +585,7 @@ fn print_completion_summary(
     println!("Scanner: {scanner_name}");
     println!("Report: {}", report_path.display());
     println!("Findings: {finding_count} total");
+    println!("Needs human review: {human_review_count}");
     println!("Exit code: {} = {exit_meaning}", exit_code.as_i32());
     if scanner_name == "builtin" {
         println!();
@@ -991,16 +1001,29 @@ fn detect_line(
         || has_aws_access_key_id
         || has_supabase_service_role;
 
-    if !has_specific_finding && is_generic_secret_line(line) {
-        findings.push(secret_finding(
-            "Possible Generic Secret",
-            Severity::Medium,
-            "Low",
-            &relative_path,
-            line_number,
-            line,
-            "A secret-like configuration value may be hardcoded or committed in a text file.",
-        ));
+    if !has_specific_finding {
+        if let Some(classification) = classify_generic_secret_line(line) {
+            match classification {
+                FindingClassification::NeedsHumanReview => findings.push(secret_finding(
+                    "Possible Generic Secret",
+                    Severity::Medium,
+                    "Low",
+                    &relative_path,
+                    line_number,
+                    line,
+                    "A secret-like configuration value may be hardcoded or committed in a text file.",
+                )),
+                FindingClassification::SafePlaceholder
+                | FindingClassification::SafeEnvironmentVariableReference => {
+                    findings.push(safe_generic_finding(
+                        classification,
+                        &relative_path,
+                        line_number,
+                        line,
+                    ));
+                }
+            }
+        }
     }
 
     findings
@@ -1022,6 +1045,7 @@ fn secret_finding(
         rule_id: None,
         title: title.to_string(),
         severity,
+        classification: FindingClassification::NeedsHumanReview,
         file: Some(file.to_path_buf()),
         line: Some(line),
         secret_type,
@@ -1038,6 +1062,43 @@ fn secret_finding(
             "git status --short".to_string(),
             "git log --all -- <file>".to_string(),
         ],
+    }
+}
+
+fn safe_generic_finding(
+    classification: FindingClassification,
+    file: &Path,
+    line: usize,
+    evidence: &str,
+) -> SecretBentoFinding {
+    let (title, risk, remediation) = match classification {
+        FindingClassification::SafePlaceholder => (
+            "Safe Placeholder Configuration",
+            "This value is an obvious placeholder, not an observed hard-coded secret.",
+            "No source change is needed for this placeholder value.",
+        ),
+        FindingClassification::SafeEnvironmentVariableReference => (
+            "Safe Environment Variable Reference",
+            "This code reads a value from the runtime environment instead of hard-coding it in source.",
+            "No source change is needed for this environment-variable reference.",
+        ),
+        FindingClassification::NeedsHumanReview => unreachable!(),
+    };
+
+    SecretBentoFinding {
+        scanner: "builtin".to_string(),
+        rule_id: None,
+        title: title.to_string(),
+        severity: Severity::Low,
+        classification,
+        file: Some(file.to_path_buf()),
+        line: Some(line),
+        secret_type: "Generic Secret".to_string(),
+        fingerprint: None,
+        description: redact_line(evidence),
+        risk: risk.to_string(),
+        remediation: vec![remediation.to_string()],
+        verification_commands: vec!["git diff --check".to_string()],
     }
 }
 
@@ -1069,13 +1130,37 @@ fn is_supabase_service_role_line(line: &str) -> bool {
         }
 }
 
+#[cfg(test)]
 fn is_generic_secret_line(line: &str) -> bool {
+    matches!(
+        classify_generic_secret_line(line),
+        Some(FindingClassification::NeedsHumanReview)
+    )
+}
+
+fn classify_generic_secret_line(line: &str) -> Option<FindingClassification> {
     let upper = line.to_ascii_uppercase();
-    GENERIC_SECRET_NAMES.iter().any(|name| upper.contains(name))
-        && match extract_assignment_value(line) {
-            Some(value) => !is_placeholder_value(value),
-            None => false,
-        }
+    if !GENERIC_SECRET_NAMES.iter().any(|name| upper.contains(name)) {
+        return None;
+    }
+
+    let value = extract_assignment_value(line)?;
+    if is_placeholder_value(value) {
+        Some(FindingClassification::SafePlaceholder)
+    } else if is_environment_variable_reference(value) {
+        Some(FindingClassification::SafeEnvironmentVariableReference)
+    } else {
+        Some(FindingClassification::NeedsHumanReview)
+    }
+}
+
+fn is_environment_variable_reference(value: &str) -> bool {
+    let normalized = value.trim().to_ascii_lowercase();
+    normalized.starts_with("process.env.")
+        || normalized.starts_with("$env:")
+        || normalized.starts_with("env(")
+        || normalized.starts_with("std::env::var(")
+        || normalized.starts_with("system.getenv(")
 }
 
 fn extract_assignment_value(line: &str) -> Option<&str> {
@@ -1125,7 +1210,8 @@ fn is_placeholder_value(value: &str) -> bool {
     let normalized = value
         .trim()
         .trim_matches(|character| matches!(character, '"' | '\'' | '`'))
-        .to_ascii_lowercase();
+        .to_ascii_lowercase()
+        .replace('-', "_");
 
     PLACEHOLDER_VALUES
         .iter()
@@ -1146,6 +1232,7 @@ fn check_env_file(root: &Path, excludes: &[String]) -> Vec<SecretBentoFinding> {
         rule_id: None,
         title: ".env File Exists".to_string(),
         severity: Severity::Low,
+        classification: FindingClassification::NeedsHumanReview,
         file: Some(PathBuf::from(".env")),
         line: None,
         secret_type: "Environment file".to_string(),
@@ -1169,6 +1256,7 @@ fn check_env_file(root: &Path, excludes: &[String]) -> Vec<SecretBentoFinding> {
             rule_id: None,
             title: "Tracked .env File".to_string(),
             severity: Severity::High,
+            classification: FindingClassification::NeedsHumanReview,
             file: Some(PathBuf::from(".env")),
             line: None,
             secret_type: "Tracked environment file".to_string(),
@@ -1311,6 +1399,7 @@ fn normalize_gitleaks_finding(finding: GitleaksJsonFinding) -> SecretBentoFindin
         rule_id,
         title,
         severity: Severity::High,
+        classification: FindingClassification::NeedsHumanReview,
         file: finding.file.map(PathBuf::from),
         line: finding.start_line,
         secret_type,
@@ -1446,6 +1535,18 @@ mod tests {
     fn ignores_placeholder_generic_values() {
         assert!(!is_generic_secret_line("API_KEY=replace_me"));
         assert!(!is_generic_secret_line("DATABASE_URL=example"));
+        assert!(!is_generic_secret_line("API_KEY=your-api-key-here"));
+    }
+
+    #[test]
+    fn classifies_environment_variable_references_as_safe() {
+        assert_eq!(
+            classify_generic_secret_line("const API_KEY = process.env.API_KEY;"),
+            Some(FindingClassification::SafeEnvironmentVariableReference)
+        );
+        assert!(!is_generic_secret_line(
+            "const API_KEY = process.env.API_KEY;"
+        ));
     }
 
     #[test]
@@ -1538,6 +1639,7 @@ mod tests {
             rule_id: None,
             title: "Possible OpenAI API Key".to_string(),
             severity: Severity::High,
+            classification: FindingClassification::NeedsHumanReview,
             file: Some(PathBuf::from("docs/sample-report.md")),
             line: Some(34),
             secret_type: "OpenAI API Key".to_string(),
