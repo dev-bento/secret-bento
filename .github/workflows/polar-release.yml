@@ -21,12 +21,55 @@ on:
         required: true
         default: false
         type: boolean
+      create_service_checkout:
+        description: Create the Safe Handoff Review checkout link when absent
+        required: true
+        default: false
+        type: boolean
 permissions:
   contents: write
 concurrency:
   group: polar-release-production
   cancel-in-progress: false
 jobs:
+  create-service-checkout:
+    if: inputs.create_service_checkout
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create Safe Handoff Review checkout link
+        shell: pwsh
+        env:
+          POLAR_OAT: ${{ secrets.POLAR_OAT }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-StrictMode -Version Latest
+          $api = "https://api.polar.sh/v1"
+          $headers = @{ Authorization = "Bearer $($env:POLAR_OAT)"; Accept = "application/json"; "Content-Type" = "application/json" }
+          $productId = "394674a5-8efc-402d-81e4-877b359ce5c4"
+          $product = Invoke-RestMethod -Method Get -Uri "$api/products/$productId" -Headers $headers
+          if ($product.name -ne "Safe Handoff Review" -or $product.visibility -ne "public") { throw "Safe Handoff Review must be public before creating a checkout link." }
+          $jpyPrice = @($product.prices | Where-Object { $_.price_currency -eq "jpy" -and $_.price_amount -eq 4980 })
+          if ($jpyPrice.Count -ne 1) { throw "Expected exactly one JPY 4,980 price." }
+          $links = Invoke-RestMethod -Method Get -Uri "$api/checkout-links/?product_id=$productId&limit=100" -Headers $headers
+          $existing = @($links.items | Where-Object {
+            $slug = $_.metadata.psobject.Properties["offer_slug"]
+            $null -ne $slug -and $slug.Value -eq "safe-handoff-review-pilot"
+          })
+          if ($existing.Count -gt 1) { throw "Multiple Safe Handoff Review checkout links exist." }
+          if ($existing.Count -eq 1) { Write-Host "Safe Handoff Review checkout link already exists: $($existing[0].url)"; return }
+          $body = @{
+            product_price_id = $jpyPrice[0].id
+            payment_processor = "stripe"
+            label = "Safe Handoff Review pilot"
+            metadata = @{ offer_slug = "safe-handoff-review-pilot"; price_jpy = 4980 }
+            allow_discount_codes = $false
+            require_billing_address = $false
+            return_url = "https://dev-bento-site.pages.dev/ja.html"
+          }
+          $created = Invoke-RestMethod -Method Post -Uri "$api/checkout-links/" -Headers $headers -Body ($body | ConvertTo-Json -Depth 10)
+          if ([string]::IsNullOrWhiteSpace($created.url)) { throw "Polar did not return a checkout URL." }
+          Write-Host "Created Safe Handoff Review checkout link: $($created.url)"
+
   publish-service-product:
     if: inputs.publish_service_product
     runs-on: ubuntu-latest
