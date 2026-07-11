@@ -1,7 +1,7 @@
 name: Ensure Safe Handoff Review product
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 permissions:
   contents: read
