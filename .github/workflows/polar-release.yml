@@ -47,7 +47,6 @@ jobs:
             name = "Safe Handoff Review"
             description = "Guided 20-30 minute setup for AI-built applications: local secret scan, redacted AI handoff, AI-safe versus human-only actions, approved limited edit support, and re-scan. Not a security audit or a guarantee that every secret is detected or publishing is safe. Credential rotation, billing investigations, production dashboard changes, and Git history rewriting are not included."
             visibility = "draft"
-            organization_id = $reference.organization_id
             metadata = @{ offer_slug = "safe-handoff-review-pilot"; offer_type = "guided_service"; pilot_slots = 3; pilot_price_jpy = 4980 }
             prices = @(@{ amount_type = "fixed"; price_currency = "jpy"; price_amount = 4980 })
           }
