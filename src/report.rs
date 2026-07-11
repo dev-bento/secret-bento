@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::finding::{SecretBentoFinding, Severity};
+use crate::finding::{FindingClassification, SecretBentoFinding, Severity};
 
 pub(crate) fn generate_report(
     root: &Path,
@@ -55,6 +55,20 @@ fn generate_report_for_purpose(
         .iter()
         .filter(|finding| finding.severity == Severity::Low)
         .count();
+    let needs_human_review = findings
+        .iter()
+        .filter(|finding| finding.classification.needs_human_review())
+        .count();
+    let safe_placeholder = findings
+        .iter()
+        .filter(|finding| finding.classification == FindingClassification::SafePlaceholder)
+        .count();
+    let safe_environment_reference = findings
+        .iter()
+        .filter(|finding| {
+            finding.classification == FindingClassification::SafeEnvironmentVariableReference
+        })
+        .count();
 
     let mut report = String::new();
     report.push_str(purpose.title());
@@ -79,6 +93,13 @@ fn generate_report_for_purpose(
     report.push_str(&format!("| High | {high} |\n"));
     report.push_str(&format!("| Medium | {medium} |\n"));
     report.push_str(&format!("| Low | {low} |\n\n"));
+    report.push_str("| Classification | Count |\n");
+    report.push_str("| --- | ---: |\n");
+    report.push_str(&format!("| Needs human review | {needs_human_review} |\n"));
+    report.push_str(&format!("| Safe placeholder | {safe_placeholder} |\n"));
+    report.push_str(&format!(
+        "| Safe environment-variable reference | {safe_environment_reference} |\n\n"
+    ));
 
     if purpose.is_handoff() {
         render_safe_to_share_checklist(&mut report);
@@ -108,6 +129,10 @@ fn generate_report_for_purpose(
                 report.push_str(&format!("- Rule ID: `{rule_id}`\n"));
             }
             report.push_str(&format!("- Severity: {}\n", finding.severity.as_str()));
+            report.push_str(&format!(
+                "- Classification: {}\n",
+                finding.classification.as_str()
+            ));
             if let Some(file) = &finding.file {
                 report.push_str(&format!("- File: `{}`\n", file.display()));
             }

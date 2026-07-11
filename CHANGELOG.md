@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.6.2 - 2026-07-11
+
+### Added
+- Added finding classifications for candidates that need human review, safe placeholders, and safe environment-variable references.
+- Added classification counts and per-finding classification labels to generated Markdown reports.
+
+### Changed
+- Built-in generic-secret checks now keep obvious placeholders and environment-variable references visible as safe observations instead of treating them as unresolved candidates.
+- Exit code `1` is now reserved for candidates that need human review; reports containing only safe observations exit with code `0`.
+- Completion summaries now show the number of candidates that need human review.
+
+### Safety Notes
+- Specific token-shaped findings and Gitleaks findings continue to require human review.
+- A clean exit does not guarantee that a repository contains no secrets or replace Gitleaks, GitHub secret scanning, credential rotation, or human review.
+
 ## v0.6.1 - 2026-06-17
 
 ### Changed
