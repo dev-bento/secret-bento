@@ -11,12 +11,52 @@ on:
         required: true
         default: false
         type: boolean
+      ensure_service_product:
+        description: Create the draft JPY 4,980 Safe Handoff Review when absent
+        required: true
+        default: false
+        type: boolean
 permissions:
   contents: write
 concurrency:
   group: polar-release-production
   cancel-in-progress: false
 jobs:
+  ensure-service-product:
+    if: inputs.ensure_service_product
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create draft product when absent
+        shell: pwsh
+        env:
+          POLAR_OAT: ${{ secrets.POLAR_OAT }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-StrictMode -Version Latest
+          $api = "https://api.polar.sh/v1"
+          $headers = @{ Authorization = "Bearer $($env:POLAR_OAT)"; Accept = "application/json"; "Content-Type" = "application/json" }
+          $reference = Invoke-RestMethod -Method Get -Uri "$api/products/d1574a9d-d898-4b63-bf7a-7ecd787c3996" -Headers $headers
+          $products = Invoke-RestMethod -Method Get -Uri "$api/products/?organization_id=$($reference.organization_id)&limit=100" -Headers $headers
+          $existing = $products.items | Where-Object {
+            $slug = $_.metadata.psobject.Properties["offer_slug"]
+            $null -ne $slug -and $slug.Value -eq "safe-handoff-review-pilot"
+          }
+          if (@($existing).Count -gt 1) { throw "Multiple Safe Handoff Review pilot products exist." }
+          if (@($existing).Count -eq 1) { Write-Host "Safe Handoff Review already exists: $($existing.id)"; return }
+          $body = @{
+            name = "Safe Handoff Review"
+            description = "Guided 20-30 minute setup for AI-built applications: local secret scan, redacted AI handoff, AI-safe versus human-only actions, approved limited edit support, and re-scan. Not a security audit or a guarantee that every secret is detected or publishing is safe. Credential rotation, billing investigations, production dashboard changes, and Git history rewriting are not included."
+            visibility = "draft"
+            organization_id = $reference.organization_id
+            metadata = @{ offer_slug = "safe-handoff-review-pilot"; offer_type = "guided_service"; pilot_slots = 3; pilot_price_jpy = 4980 }
+            prices = @(@{ amount_type = "fixed"; price_currency = "jpy"; price_amount = 4980 })
+          }
+          $created = Invoke-RestMethod -Method Post -Uri "$api/products/" -Headers $headers -Body ($body | ConvertTo-Json -Depth 10)
+          if ($created.visibility -ne "draft" -or $created.prices[0].price_currency -ne "jpy" -or $created.prices[0].price_amount -ne 4980) {
+            throw "Polar returned an unexpected product configuration."
+          }
+          Write-Host "Created draft Safe Handoff Review product: $($created.id)"
+
   validate-and-promote:
     runs-on: ubuntu-latest
     steps:
