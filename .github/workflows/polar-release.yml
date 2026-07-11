@@ -31,12 +31,59 @@ on:
         required: true
         default: false
         type: boolean
+      repair_service_checkout_usd:
+        description: Recreate the USD Safe Handoff Review checkout link with the verified USD price ID
+        required: true
+        default: false
+        type: boolean
 permissions:
   contents: write
 concurrency:
   group: polar-release-production
   cancel-in-progress: false
 jobs:
+  repair-service-checkout-usd:
+    if: inputs.repair_service_checkout_usd
+    runs-on: ubuntu-latest
+    steps:
+      - name: Recreate USD Safe Handoff Review checkout link
+        shell: pwsh
+        env:
+          POLAR_OAT: ${{ secrets.POLAR_OAT }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-StrictMode -Version Latest
+          $api = "https://api.polar.sh/v1"
+          $headers = @{ Authorization = "Bearer $($env:POLAR_OAT)"; Accept = "application/json"; "Content-Type" = "application/json" }
+          $productId = "394674a5-8efc-402d-81e4-877b359ce5c4"
+          $usdPriceId = "ef7d3775-077c-4359-842d-9eb84e910ec0"
+          $product = Invoke-RestMethod -Method Get -Uri "$api/products/$productId" -Headers $headers
+          if ($product.name -ne "Safe Handoff Review" -or $product.visibility -ne "public") { throw "Safe Handoff Review must be public." }
+          $usdPrice = @($product.prices | Where-Object { $_.id -eq $usdPriceId -and $_.price_currency -eq "usd" -and $_.price_amount -eq 3300 })
+          if ($usdPrice.Count -ne 1) { throw "Verified USD Product Price ID is not present as USD 33." }
+          $links = Invoke-RestMethod -Method Get -Uri "$api/checkout-links/?product_id=$productId&limit=100" -Headers $headers
+          $existing = @($links.items | Where-Object {
+            $slug = $_.metadata.psobject.Properties["offer_slug"]
+            $null -ne $slug -and $slug.Value -eq "safe-handoff-review-pilot-usd"
+          })
+          if ($existing.Count -gt 1) { throw "Multiple USD Safe Handoff Review checkout links exist." }
+          if ($existing.Count -eq 1) {
+            Invoke-RestMethod -Method Delete -Uri "$api/checkout-links/$($existing[0].id)" -Headers $headers | Out-Null
+            Write-Host "Removed the previous USD link before recreation."
+          }
+          $body = @{
+            product_price_id = $usdPriceId
+            payment_processor = "stripe"
+            label = "Safe Handoff Review pilot (USD)"
+            metadata = @{ offer_slug = "safe-handoff-review-pilot-usd"; price_usd = 33 }
+            allow_discount_codes = $false
+            require_billing_address = $false
+            return_url = "https://dev-bento-site.pages.dev/en.html"
+          }
+          $created = Invoke-RestMethod -Method Post -Uri "$api/checkout-links/" -Headers $headers -Body ($body | ConvertTo-Json -Depth 10)
+          if ([string]::IsNullOrWhiteSpace($created.url)) { throw "Polar did not return a USD checkout URL." }
+          Write-Host "Recreated USD Safe Handoff Review checkout link: $($created.url)"
+
   create-service-checkout-usd:
     if: inputs.create_service_checkout_usd
     runs-on: ubuntu-latest
