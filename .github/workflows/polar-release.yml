@@ -36,12 +36,72 @@ on:
         required: true
         default: false
         type: boolean
+      create_service_checkout_product:
+        description: Create a Product ID based Safe Handoff Review checkout link when absent
+        required: true
+        default: false
+        type: boolean
 permissions:
   contents: write
 concurrency:
   group: polar-release-production
   cancel-in-progress: false
 jobs:
+  create-service-checkout-product:
+    if: inputs.create_service_checkout_product
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create and validate Product ID based Safe Handoff Review checkout link
+        shell: pwsh
+        env:
+          POLAR_OAT: ${{ secrets.POLAR_OAT }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-StrictMode -Version Latest
+          $api = "https://api.polar.sh/v1"
+          $headers = @{ Authorization = "Bearer $($env:POLAR_OAT)"; Accept = "application/json"; "Content-Type" = "application/json" }
+          $productId = "394674a5-8efc-402d-81e4-877b359ce5c4"
+          $slug = "safe-handoff-review-product-link"
+          $product = Invoke-RestMethod -Method Get -Uri "$api/products/$productId" -Headers $headers
+          if ($product.name -ne "Safe Handoff Review" -or $product.visibility -ne "public") { throw "Safe Handoff Review must be public before creating a checkout link." }
+          $jpyPrice = @($product.prices | Where-Object { $_.price_currency -eq "jpy" -and $_.price_amount -eq 4980 })
+          if ($jpyPrice.Count -ne 1) { throw "Expected exactly one JPY 4,980 price on the product." }
+          $links = Invoke-RestMethod -Method Get -Uri "$api/checkout-links/?product_id=$productId&limit=100" -Headers $headers
+          $existing = @($links.items | Where-Object {
+            $offer = $_.metadata.psobject.Properties["offer_slug"]
+            $null -ne $offer -and $offer.Value -eq $slug
+          })
+          if ($existing.Count -gt 1) { throw "Multiple Product ID based Safe Handoff Review checkout links exist." }
+          if ($existing.Count -eq 1) {
+            Write-Host "Product ID based Safe Handoff Review checkout link already exists: $($existing[0].url)"
+            return
+          }
+          $body = @{
+            product_id = $productId
+            payment_processor = "stripe"
+            label = "Safe Handoff Review (Product ID)"
+            metadata = @{ offer_slug = $slug; price_selection = "automatic" }
+            allow_discount_codes = $false
+            require_billing_address = $false
+            return_url = "https://dev-bento-site.pages.dev/"
+          }
+          Write-Host "Creating Product ID based checkout link with body: $($body | ConvertTo-Json -Depth 10 -Compress)"
+          $created = Invoke-RestMethod -Method Post -Uri "$api/checkout-links/" -Headers $headers -Body ($body | ConvertTo-Json -Depth 10)
+          try {
+            if ([string]::IsNullOrWhiteSpace($created.url)) { throw "Polar did not return a checkout URL." }
+            $createdProductIds = @($created.products | ForEach-Object { $_.id })
+            if ($createdProductIds.Count -ne 1 -or $createdProductIds[0] -ne $productId) { throw "Created link is not bound to the requested Product ID." }
+            $page = Invoke-WebRequest -UseBasicParsing -Uri $created.url
+            if ($page.StatusCode -ne 200) { throw "Created checkout URL returned HTTP $($page.StatusCode)." }
+            if ($page.Content -notmatch [regex]::Escape($productId)) { throw "Public checkout HTML does not contain the requested Product ID." }
+            if ($page.Content -notmatch "4980|4,980|¥4,980") { throw "Public checkout HTML does not expose the expected JPY 4,980 price." }
+          } catch {
+            Invoke-RestMethod -Method Delete -Uri "$api/checkout-links/$($created.id)" -Headers $headers | Out-Null
+            Write-Host "Rolled back newly created checkout link $($created.id) after validation failure."
+            throw
+          }
+          Write-Host "Created Product ID based Safe Handoff Review checkout link: $($created.url)"
+
   repair-service-checkout-usd:
     if: inputs.repair_service_checkout_usd
     runs-on: ubuntu-latest
