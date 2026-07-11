@@ -1,0 +1,71 @@
+name: Polar release gate
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing final CLI release version (without v)
+        required: true
+        type: string
+      promote:
+        description: Update Polar metadata after validation
+        required: true
+        default: false
+        type: boolean
+permissions:
+  contents: read
+concurrency:
+  group: polar-release-production
+  cancel-in-progress: false
+jobs:
+  validate-and-promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release automation
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build release manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $commit = git rev-list -n 1 "v${{ inputs.version }}"
+          if ([string]::IsNullOrWhiteSpace($commit)) {
+            throw "Tag v${{ inputs.version }} was not found."
+          }
+          $manifest = [ordered]@{
+            schema_version = 1
+            product = "secret-bento"
+            cli_version = "${{ inputs.version }}"
+            git_tag = "v${{ inputs.version }}"
+            git_commit = $commit
+            crate = @{ name = "secret-bento"; version = "${{ inputs.version }}" }
+            github_release = @{ tag = "v${{ inputs.version }}" }
+            polar = @{ product_id = "d1574a9d-d898-4b63-bf7a-7ecd787c3996" }
+            status = "staged"
+          }
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $manifest | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8NoBOM dist/release-manifest.json
+          $hash = (Get-FileHash -Algorithm SHA256 dist/release-manifest.json).Hash.ToLowerInvariant()
+          "$hash  release-manifest.json" | Set-Content -Encoding ascii dist/SHA256SUMS.txt
+          "git_commit=$commit" >> $env:GITHUB_ENV
+          "manifest_sha256=$hash" >> $env:GITHUB_ENV
+      - name: Validate all release authorities
+        shell: pwsh
+        env:
+          POLAR_OAT: ${{ secrets.POLAR_OAT }}
+        run: ./scripts/polar-release.ps1 -Mode Validate -Version '${{ inputs.version }}' -GitCommit '${{ env.git_commit }}' -ManifestSha256 '${{ env.manifest_sha256 }}'
+      - name: Promote Polar product
+        if: inputs.promote
+        shell: pwsh
+        env:
+          POLAR_OAT: ${{ secrets.POLAR_OAT }}
+        run: ./scripts/polar-release.ps1 -Mode Promote -Version '${{ inputs.version }}' -GitCommit '${{ env.git_commit }}' -ManifestSha256 '${{ env.manifest_sha256 }}'
+      - name: Preserve release evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: polar-release-evidence-v${{ inputs.version }}
+          path: |
+            dist/release-manifest.json
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 90
