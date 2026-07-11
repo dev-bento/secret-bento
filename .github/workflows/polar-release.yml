@@ -16,12 +16,37 @@ on:
         required: true
         default: false
         type: boolean
+      publish_service_product:
+        description: Publish the existing Safe Handoff Review product
+        required: true
+        default: false
+        type: boolean
 permissions:
   contents: write
 concurrency:
   group: polar-release-production
   cancel-in-progress: false
 jobs:
+  publish-service-product:
+    if: inputs.publish_service_product
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish Safe Handoff Review
+        shell: pwsh
+        env:
+          POLAR_OAT: ${{ secrets.POLAR_OAT }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-StrictMode -Version Latest
+          $api = "https://api.polar.sh/v1"
+          $headers = @{ Authorization = "Bearer $($env:POLAR_OAT)"; Accept = "application/json"; "Content-Type" = "application/json" }
+          $productId = "394674a5-8efc-402d-81e4-877b359ce5c4"
+          $product = Invoke-RestMethod -Method Get -Uri "$api/products/$productId" -Headers $headers
+          if ($product.name -ne "Safe Handoff Review") { throw "Unexpected product for publication." }
+          $updated = Invoke-RestMethod -Method Patch -Uri "$api/products/$productId" -Headers $headers -Body (@{ visibility = "public" } | ConvertTo-Json)
+          if ($updated.visibility -ne "public") { throw "Polar did not publish Safe Handoff Review." }
+          Write-Host "Published Safe Handoff Review product $productId."
+
   ensure-service-product:
     if: inputs.ensure_service_product
     runs-on: ubuntu-latest
