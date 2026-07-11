@@ -47,12 +47,15 @@ jobs:
             name = "Safe Handoff Review"
             description = "Guided 20-30 minute setup for AI-built applications: local secret scan, redacted AI handoff, AI-safe versus human-only actions, approved limited edit support, and re-scan. Not a security audit or a guarantee that every secret is detected or publishing is safe. Credential rotation, billing investigations, production dashboard changes, and Git history rewriting are not included."
             visibility = "draft"
-            organization_id = $reference.organization_id
             metadata = @{ offer_slug = "safe-handoff-review-pilot"; offer_type = "guided_service"; pilot_slots = 3; pilot_price_jpy = 4980 }
-            prices = @(@{ amount_type = "fixed"; price_currency = "jpy"; price_amount = 4980 })
+            prices = @(
+              @{ amount_type = "fixed"; price_currency = "usd"; price_amount = 3300 }
+              @{ amount_type = "fixed"; price_currency = "jpy"; price_amount = 4980 }
+            )
           }
           $created = Invoke-RestMethod -Method Post -Uri "$api/products/" -Headers $headers -Body ($body | ConvertTo-Json -Depth 10)
-          if ($created.visibility -ne "draft" -or $created.prices[0].price_currency -ne "jpy" -or $created.prices[0].price_amount -ne 4980) {
+          $jpyPrice = $created.prices | Where-Object { $_.price_currency -eq "jpy" -and $_.price_amount -eq 4980 }
+          if ($created.visibility -ne "draft" -or @($jpyPrice).Count -ne 1) {
             throw "Polar returned an unexpected product configuration."
           }
           Write-Host "Created draft Safe Handoff Review product: $($created.id)"
