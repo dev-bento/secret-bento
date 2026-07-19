@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::env;
 use std::ffi::OsStr;
 use std::fs;
@@ -169,6 +170,12 @@ trait Scanner {
 struct BuiltinScanner;
 struct GitleaksScanner;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GitleaksScanMode {
+    GitHistory,
+    WorkingTree,
+}
+
 impl Scanner for BuiltinScanner {
     fn name(&self) -> &'static str {
         "builtin"
@@ -198,19 +205,16 @@ impl Scanner for GitleaksScanner {
     }
 
     fn scan(&self, context: &ScanContext) -> Result<ScanResult, String> {
-        let source = context.root.display().to_string();
-        let args = gitleaks_detect_args(&source);
-        let output = Command::new("gitleaks").args(args).output();
-
-        let output = match output {
-            Ok(output) => output,
-            Err(error) if error.kind() == ErrorKind::NotFound => {
-                return Err(missing_gitleaks_message());
-            }
-            Err(error) => return Err(format!("failed to run gitleaks: {error}")),
-        };
-
-        let findings = parse_gitleaks_stdout(output.status.code(), &output.stdout, &output.stderr)?;
+        let source = ".";
+        let history_findings = run_gitleaks(
+            &gitleaks_detect_args(source, GitleaksScanMode::GitHistory),
+            &context.root,
+        )?;
+        let working_tree_findings = run_gitleaks(
+            &gitleaks_detect_args(source, GitleaksScanMode::WorkingTree),
+            &context.root,
+        )?;
+        let findings = merge_gitleaks_findings(history_findings, working_tree_findings);
 
         Ok(ScanResult {
             scanner_name: self.name(),
@@ -1305,8 +1309,8 @@ struct GitleaksJsonFinding {
     fingerprint: Option<String>,
 }
 
-fn gitleaks_detect_args(source: &str) -> Vec<String> {
-    vec![
+fn gitleaks_detect_args(source: &str, mode: GitleaksScanMode) -> Vec<String> {
+    let mut args = vec![
         "detect".to_string(),
         "--source".to_string(),
         source.to_string(),
@@ -1319,7 +1323,52 @@ fn gitleaks_detect_args(source: &str) -> Vec<String> {
         "--no-color".to_string(),
         "--log-level".to_string(),
         "fatal".to_string(),
-    ]
+    ];
+
+    if mode == GitleaksScanMode::WorkingTree {
+        args.push("--no-git".to_string());
+    }
+
+    args
+}
+
+fn run_gitleaks(args: &[String], root: &Path) -> Result<Vec<SecretBentoFinding>, String> {
+    let output = Command::new("gitleaks")
+        .args(args)
+        .current_dir(root)
+        .output();
+
+    let output = match output {
+        Ok(output) => output,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return Err(missing_gitleaks_message());
+        }
+        Err(error) => return Err(format!("failed to run gitleaks: {error}")),
+    };
+
+    parse_gitleaks_stdout(output.status.code(), &output.stdout, &output.stderr)
+}
+
+fn merge_gitleaks_findings(
+    history_findings: Vec<SecretBentoFinding>,
+    working_tree_findings: Vec<SecretBentoFinding>,
+) -> Vec<SecretBentoFinding> {
+    let mut seen = HashSet::new();
+    let mut merged = Vec::new();
+
+    for finding in history_findings.into_iter().chain(working_tree_findings) {
+        let identity = (
+            finding.rule_id.clone(),
+            finding.file.clone(),
+            finding.line,
+            finding.secret_type.clone(),
+        );
+        if seen.insert(identity) {
+            merged.push(finding);
+        }
+    }
+
+    merged
 }
 
 fn parse_gitleaks_stdout(
@@ -2045,8 +2094,8 @@ mod tests {
     }
 
     #[test]
-    fn gitleaks_detect_args_write_redacted_json_to_stdout() {
-        let args = gitleaks_detect_args("/repo");
+    fn gitleaks_git_history_args_write_redacted_json_to_stdout() {
+        let args = gitleaks_detect_args("/repo", GitleaksScanMode::GitHistory);
 
         assert_eq!(
             args,
@@ -2068,6 +2117,30 @@ mod tests {
     }
 
     #[test]
+    fn gitleaks_working_tree_args_disable_git_history_mode() {
+        let args = gitleaks_detect_args("/repo", GitleaksScanMode::WorkingTree);
+
+        assert_eq!(
+            args,
+            vec![
+                "detect",
+                "--source",
+                "/repo",
+                "--report-format",
+                "json",
+                "--report-path",
+                "-",
+                "--redact",
+                "--no-banner",
+                "--no-color",
+                "--log-level",
+                "fatal",
+                "--no-git",
+            ]
+        );
+    }
+
+    #[test]
     fn gitleaks_stdout_exit_zero_parses_clean_report() {
         let findings = parse_gitleaks_stdout(Some(0), b"[]", b"").unwrap();
 
@@ -2082,6 +2155,19 @@ mod tests {
         assert_eq!(findings.len(), 2);
         assert_eq!(findings[0].scanner, "gitleaks");
         assert_eq!(findings[0].rule_id.as_deref(), Some("aws-access-token"));
+    }
+
+    #[test]
+    fn gitleaks_findings_are_deduplicated_across_history_and_working_tree() {
+        let json = include_str!("../tests/fixtures/gitleaks-report.json");
+        let history_findings = parse_gitleaks_json(json).unwrap();
+        let working_tree_findings = parse_gitleaks_json(json).unwrap();
+
+        let findings = merge_gitleaks_findings(history_findings, working_tree_findings);
+
+        assert_eq!(findings.len(), 2);
+        assert_eq!(findings[0].rule_id.as_deref(), Some("aws-access-token"));
+        assert_eq!(findings[1].rule_id.as_deref(), Some("generic-api-key"));
     }
 
     #[test]
